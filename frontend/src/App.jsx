@@ -15,6 +15,7 @@ import {
 } from "@solana/wallet-adapter-wallets";
 import { clusterApiUrl, Connection, PublicKey } from "@solana/web3.js";
 import "@solana/wallet-adapter-react-ui/styles.css";
+import "./App.css";
 
 function App() {
   const network = WalletAdapterNetwork.Devnet;
@@ -31,8 +32,11 @@ function App() {
         <WalletModalProvider>
           <div className="App">
             <header className="App-header">
-              <h1>Solana Token Manager</h1>
-              <WalletMultiButton />
+              <h1>
+                Solana Token Manager
+                <WalletMultiButton />
+              </h1>
+
               <WalletInfo />
             </header>
           </div>
@@ -109,9 +113,13 @@ function WalletInfo() {
 
   return (
     <div>
-      <p>Wallet Address: {publicKey.toBase58()}</p>
-      <p>Balance: {balance !== null ? balance.toFixed(4) : "Loading..."} SOL</p>
-      <button onClick={disconnect}>Disconnect Wallet</button>
+      <div className="balanceandwalletmain">
+        <p>Wallet Address: {publicKey.toBase58()}</p>
+        <p>
+          Balance: {balance !== null ? balance.toFixed(4) : "Loading..."} SOL
+        </p>
+        <button onClick={disconnect}>Disconnect Wallet</button>
+      </div>
 
       {/* Mint Token Section */}
       <div>
@@ -121,7 +129,7 @@ function WalletInfo() {
       </div>
 
       {/* Transfer Token Section */}
-      <div>
+      <div className="transfertokenform">
         <h3>Transfer Tokens</h3>
         <input
           type="text"
