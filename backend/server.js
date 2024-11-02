@@ -2,41 +2,97 @@ const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
 const dotenv = require("dotenv");
-const Token = require("./models/Token");
+const solanaService = require("./services/solanaService");
+const { Keypair } = require("@solana/web3.js");
+const { PublicKey } = require("@solana/web3.js");
+
 dotenv.config();
 
 const app = express();
-
-// Middleware
-app.use(express.json()); // To handle JSON requests
+app.use(express.json()); // To parse JSON requests
 app.use(cors()); // Enable CORS
 
+// Root endpoint
 app.get("/", (req, res) => {
   res.send("Backend server is running");
 });
 
-app.post("/api/tokens", async (req, res) => {
-  const { name, symbol, totalSupply } = req.body;
-
+// Mint a new token
+app.post("/api/mint-token", async (req, res) => {
   try {
-    const newToken = new Token({ name, symbol, totalSupply });
-    await newToken.save();
-    res.status(201).json(newToken);
+    const { recipientPublicKey } = req.body; // Expecting a string from request body
+
+    // Validate recipientPublicKey
+    if (!recipientPublicKey) {
+      return res
+        .status(400)
+        .json({ message: "recipientPublicKey is required" });
+    }
+
+    // Call mintToken and ensure PublicKey conversion happens in solanaService.js
+    const mintResponse = await solanaService.mintToken(recipientPublicKey);
+    res.status(200).json({ message: mintResponse });
   } catch (error) {
-    res.status(500).json({ message: "Error creating token", error });
+    res
+      .status(500)
+      .json({ message: "Token minting failed", error: error.message });
   }
 });
 
-// Route to get all tokens
-app.get("/api/tokens", async (req, res) => {
+// Transfer tokens from one wallet to another
+app.post("/api/transfer-tokens", async (req, res) => {
+  const { mintAddress, fromWalletSecret, toWallet, amount } = req.body;
+
   try {
-    const tokens = await Token.find();
-    res.status(200).json(tokens);
+    // Convert `fromWalletSecret` to a Keypair
+    const fromWallet = Keypair.fromSecretKey(Uint8Array.from(fromWalletSecret));
+
+    // Validate recipient public key
+    if (!mintAddress || !fromWalletSecret || !toWallet || !amount) {
+      return res
+        .status(400)
+        .json({ message: "Invalid request body parameters" });
+    }
+
+    const transferResponse = await solanaService.transferTokens(
+      mintAddress,
+      fromWallet,
+      toWallet,
+      amount
+    );
+    res.status(200).json({ message: transferResponse });
   } catch (error) {
-    res.status(500).json({ message: "Error fetching tokens", error });
+    res
+      .status(500)
+      .json({ message: "Token transfer failed", error: error.message });
   }
 });
 
+// Check SOL balance of a public key
+app.get("/api/balance/:publicKey", async (req, res) => {
+  const { publicKey } = req.params;
+  try {
+    const balance = await solanaService.getBalance(publicKey);
+    res.status(200).json({ balance });
+  } catch (error) {
+    res
+      .status(500)
+      .json({ message: "Failed to fetch balance", error: error.message });
+  }
+});
+
+// Airdrop SOL to a public key
+app.post("/api/airdrop/:publicKey", async (req, res) => {
+  const { publicKey } = req.params;
+  try {
+    const message = await solanaService.airdropSol(publicKey);
+    res.status(200).json({ message });
+  } catch (error) {
+    res.status(500).json({ message: "Airdrop failed", error: error.message });
+  }
+});
+
+// MongoDB connection and server start
 const PORT = process.env.PORT || 5000;
 const MONGO_URI = process.env.MONGO_URI || "your-mongodb-uri-here";
 
