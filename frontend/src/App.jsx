@@ -46,6 +46,10 @@ function WalletInfo() {
   const { publicKey, disconnect } = useWallet();
   const [balance, setBalance] = useState(null);
   const [error, setError] = useState(null);
+  const [mintMessage, setMintMessage] = useState("");
+  const [transferMessage, setTransferMessage] = useState("");
+  const [recipient, setRecipient] = useState("");
+  const [transferAmount, setTransferAmount] = useState("");
 
   const connection = new Connection(clusterApiUrl("devnet"));
 
@@ -60,6 +64,41 @@ function WalletInfo() {
     }
   }, [publicKey]);
 
+  const handleMintToken = async () => {
+    try {
+      const response = await fetch("http://localhost:5000/api/mint-token", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ recipientPublicKey: publicKey.toBase58() }),
+      });
+      const data = await response.json();
+      setMintMessage(data.message || "Minting successful!");
+    } catch (err) {
+      setMintMessage("Failed to mint token.");
+    }
+  };
+
+  const handleTransferTokens = async () => {
+    try {
+      const response = await fetch(
+        "http://localhost:5000/api/transfer-tokens",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            toWallet: recipient,
+            mintAddress: "GfqkZP1zLacfTxpdkcEgjvbmxSZJNHVuPZpvwjVJT3oL", // Replace with the actual mint address
+            amount: parseFloat(transferAmount),
+          }),
+        }
+      );
+      const data = await response.json();
+      setTransferMessage(data.message || "Transfer successful!");
+    } catch (err) {
+      setTransferMessage("Failed to transfer tokens.");
+    }
+  };
+
   if (error) {
     return <p>Error: {error}</p>;
   }
@@ -73,6 +112,32 @@ function WalletInfo() {
       <p>Wallet Address: {publicKey.toBase58()}</p>
       <p>Balance: {balance !== null ? balance.toFixed(4) : "Loading..."} SOL</p>
       <button onClick={disconnect}>Disconnect Wallet</button>
+
+      {/* Mint Token Section */}
+      <div>
+        <h3>Mint Token</h3>
+        <button onClick={handleMintToken}>Mint Token</button>
+        {mintMessage && <p>{mintMessage}</p>}
+      </div>
+
+      {/* Transfer Token Section */}
+      <div>
+        <h3>Transfer Tokens</h3>
+        <input
+          type="text"
+          placeholder="Recipient Address"
+          value={recipient}
+          onChange={(e) => setRecipient(e.target.value)}
+        />
+        <input
+          type="number"
+          placeholder="Amount to Transfer"
+          value={transferAmount}
+          onChange={(e) => setTransferAmount(e.target.value)}
+        />
+        <button onClick={handleTransferTokens}>Transfer Tokens</button>
+        {transferMessage && <p>{transferMessage}</p>}
+      </div>
     </div>
   );
 }
