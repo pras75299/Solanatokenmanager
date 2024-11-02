@@ -5,6 +5,7 @@ const dotenv = require("dotenv");
 const solanaService = require("./services/solanaService");
 const { Keypair } = require("@solana/web3.js");
 const { PublicKey } = require("@solana/web3.js");
+const loadKeypair = require("./importKey");
 
 dotenv.config();
 
@@ -41,27 +42,30 @@ app.post("/api/mint-token", async (req, res) => {
 
 // Transfer tokens from one wallet to another
 app.post("/api/transfer-tokens", async (req, res) => {
-  const { mintAddress, fromWalletSecret, toWallet, amount } = req.body;
+  const { mintAddress, toWallet, amount } = req.body;
 
   try {
-    // Convert `fromWalletSecret` to a Keypair
-    const fromWallet = Keypair.fromSecretKey(Uint8Array.from(fromWalletSecret));
+    // Securely load the sender's Keypair on the backend
+    const fromWallet = loadKeypair();
 
-    // Validate recipient public key
-    if (!mintAddress || !fromWalletSecret || !toWallet || !amount) {
+    // Validate recipient public key and other parameters
+    if (!mintAddress || !toWallet || !amount) {
       return res
         .status(400)
         .json({ message: "Invalid request body parameters" });
     }
 
+    // Call the transferTokens function with the securely loaded Keypair
     const transferResponse = await solanaService.transferTokens(
       mintAddress,
       fromWallet,
       toWallet,
       amount
     );
+
     res.status(200).json({ message: transferResponse });
   } catch (error) {
+    console.error("Transfer Error:", error.message);
     res
       .status(500)
       .json({ message: "Token transfer failed", error: error.message });
