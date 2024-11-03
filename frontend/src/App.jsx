@@ -54,6 +54,7 @@ function WalletInfo() {
   const [transferMessage, setTransferMessage] = useState("");
   const [recipient, setRecipient] = useState("");
   const [transferAmount, setTransferAmount] = useState("");
+  const [tokenStandard, setTokenStandard] = useState("Token");
 
   const connection = new Connection(clusterApiUrl("devnet"));
 
@@ -73,7 +74,10 @@ function WalletInfo() {
       const response = await fetch("http://localhost:5000/api/mint-token", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ recipientPublicKey: publicKey.toBase58() }),
+        body: JSON.stringify({
+          recipientPublicKey: publicKey.toBase58(),
+          tokenStandard,
+        }),
       });
       const data = await response.json();
       setMintMessage(data.message || "Minting successful!");
@@ -114,11 +118,24 @@ function WalletInfo() {
   return (
     <div>
       <div className="balanceandwalletmain">
-        <p>Wallet Address: {publicKey.toBase58()}</p>
+        <p>
+          Wallet Address: {publicKey ? publicKey.toBase58() : "Not connected"}
+        </p>
         <p>
           Balance: {balance !== null ? balance.toFixed(4) : "Loading..."} SOL
         </p>
         <button onClick={disconnect}>Disconnect Wallet</button>
+      </div>
+
+      <div>
+        <h3>Select Token Standard</h3>
+        <select
+          value={tokenStandard}
+          onChange={(e) => setTokenStandard(e.target.value)}
+        >
+          <option value="Token">Token</option>
+          <option value="Token-2022">Token-2022</option>
+        </select>
       </div>
 
       {/* Mint Token Section */}

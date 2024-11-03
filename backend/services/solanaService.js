@@ -16,6 +16,7 @@ const {
   createTransferInstruction,
   getOrCreateAssociatedTokenAccount,
   TOKEN_PROGRAM_ID,
+  TOKEN_2022_PROGRAM_ID,
 } = require("@solana/spl-token");
 const dotenv = require("dotenv");
 dotenv.config();
@@ -114,6 +115,62 @@ const mintToken = async (recipientPublicKey) => {
     return `Mint successful, transaction signature: ${signature}`;
   } catch (error) {
     throw new Error(`Failed to mint token: ${error.message}`);
+  }
+};
+
+const mintToken2022 = async (recipientPublicKey) => {
+  try {
+    const recipientKey =
+      recipientPublicKey instanceof PublicKey
+        ? recipientPublicKey
+        : new PublicKey(recipientPublicKey);
+
+    //console.log("Recipient Public Key:", recipientKey.toString());
+
+    // Attempt to create a Token-2022 mint with TOKEN_PROGRAM_ID
+    const mint = await createMint(
+      connection,
+      payerKeypair,
+      payerKeypair.publicKey,
+      null,
+      9 // Decimal places
+    );
+
+    if (!mint) {
+      throw new Error("Mint creation failed: Mint object is undefined.");
+    }
+    //console.log("Mint Public Key:", mint.toString());
+
+    // Get or create the recipient's associated token account
+    const recipientTokenAccount = await getOrCreateAssociatedTokenAccount(
+      connection,
+      payerKeypair,
+      mint,
+      recipientKey,
+      false
+    );
+
+    console.log(
+      "Recipient Token Account:",
+      recipientTokenAccount.address.toString()
+    );
+
+    // Mint tokens to the recipient's account
+    const signature = await mintTo(
+      connection,
+      payerKeypair,
+      mint,
+      recipientTokenAccount.address,
+      payerKeypair,
+      1000 * 10 ** 9 // Amount to mint
+    );
+
+    console.log("Mint Transaction Signature:", signature);
+
+    return `Mint successful, transaction signature: ${signature}`;
+  } catch (error) {
+    console.error("Minting Error:", error.message);
+    throw new Error(`Failed to mint Token-2022: ${error.message}`);
   }
 };
 
@@ -253,4 +310,5 @@ module.exports = {
   transferTokens,
   getOrCreateMintAddress,
   airdropSolIfNeeded,
+  mintToken2022,
 };

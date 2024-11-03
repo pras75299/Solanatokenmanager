@@ -20,19 +20,30 @@ app.get("/", (req, res) => {
 
 // Mint a new token
 app.post("/api/mint-token", async (req, res) => {
+  const { recipientPublicKey, tokenStandard } = req.body;
   try {
-    const { recipientPublicKey } = req.body; // Expecting a string from request body
+    // const { recipientPublicKey, tokenStandard } = req.body;
 
-    // Validate recipientPublicKey
-    if (!recipientPublicKey) {
-      return res
-        .status(400)
-        .json({ message: "recipientPublicKey is required" });
+    // if (!recipientPublicKey) {
+    //   return res
+    //     .status(400)
+    //     .json({ message: "recipientPublicKey is required" });
+    // }
+
+    // const mintResponse = await solanaService.mintToken(recipientPublicKey);
+    // res.status(200).json({ message: mintResponse });
+
+    const recipientKey = new PublicKey(recipientPublicKey);
+    let mintAddress;
+    if (tokenStandard === "Token-2022") {
+      mintAddress = await solanaService.mintToken2022(recipientKey);
+    } else {
+      mintAddress = await solanaService.mintToken(recipientKey);
     }
 
-    // Call mintToken and ensure PublicKey conversion happens in solanaService.js
-    const mintResponse = await solanaService.mintToken(recipientPublicKey);
-    res.status(200).json({ message: mintResponse });
+    res
+      .status(200)
+      .json({ message: `Mint successful! Mint address: ${mintAddress}` });
   } catch (error) {
     res
       .status(500)
