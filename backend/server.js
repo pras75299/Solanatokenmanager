@@ -21,29 +21,21 @@ app.get("/", (req, res) => {
 // Mint a new token
 app.post("/api/mint-token", async (req, res) => {
   const { recipientPublicKey, tokenStandard } = req.body;
+
   try {
-    // const { recipientPublicKey, tokenStandard } = req.body;
-
-    // if (!recipientPublicKey) {
-    //   return res
-    //     .status(400)
-    //     .json({ message: "recipientPublicKey is required" });
-    // }
-
-    // const mintResponse = await solanaService.mintToken(recipientPublicKey);
-    // res.status(200).json({ message: mintResponse });
-
+    // Convert recipientPublicKey to PublicKey here and validate
     const recipientKey = new PublicKey(recipientPublicKey);
-    let mintAddress;
+    console.log("Parsed PublicKey in API:", recipientKey.toString());
+
+    // Call the mint function based on the selected token standard
+    let result;
     if (tokenStandard === "Token-2022") {
-      mintAddress = await solanaService.mintToken2022(recipientKey);
+      result = await solanaService.mintToken2022(recipientPublicKey);
     } else {
-      mintAddress = await solanaService.mintToken(recipientKey);
+      result = await solanaService.mintToken(recipientPublicKey);
     }
 
-    res
-      .status(200)
-      .json({ message: `Mint successful! Mint address: ${mintAddress}` });
+    res.status(200).json({ message: result });
   } catch (error) {
     res
       .status(500)
@@ -53,7 +45,7 @@ app.post("/api/mint-token", async (req, res) => {
 
 // Transfer tokens from one wallet to another
 app.post("/api/transfer-tokens", async (req, res) => {
-  const { mintAddress, toWallet, amount } = req.body;
+  const { mintAddress, toWallet, amount, tokenStandard } = req.body;
 
   try {
     // Securely load the sender's Keypair on the backend
@@ -71,7 +63,8 @@ app.post("/api/transfer-tokens", async (req, res) => {
       mintAddress,
       fromWallet,
       toWallet,
-      amount
+      amount,
+      tokenStandard
     );
 
     res.status(200).json({ message: transferResponse });
