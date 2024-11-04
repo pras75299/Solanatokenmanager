@@ -9,6 +9,7 @@ const { payerKeypair } = require("./services/metaplex");
 const { Keypair } = require("@solana/web3.js");
 const { PublicKey } = require("@solana/web3.js");
 const loadKeypair = require("./importKey");
+const NFT = require("./models/NFT");
 
 dotenv.config();
 
@@ -108,13 +109,39 @@ app.post("/api/mint-nft", async (req, res) => {
   const { recipientPublicKey, metadata } = req.body;
 
   try {
-    const result = await mintNFT(recipientPublicKey, metadata);
+    // Call the mintNFT function from solanaService
+    const result = await solanaService.mintNFT(recipientPublicKey, metadata);
+
+    // Extract mint address from the result
+    const mintAddress = result.match(/Mint Address: (.*)$/)[1];
+
+    // Save the minted NFT info to the database
+    const newNFT = new NFT({
+      recipientPublicKey,
+      mintAddress,
+      uri: metadata.uri,
+      name: metadata.name,
+      symbol: metadata.symbol,
+    });
+
+    await newNFT.save();
     res.status(200).json({ message: result });
   } catch (error) {
     console.error("Error minting NFT:", error.message);
     res
       .status(500)
       .json({ message: "NFT minting failed", error: error.message });
+  }
+});
+
+app.get("/api/minted-nfts", async (req, res) => {
+  try {
+    const nfts = await NFT.find();
+    res.status(200).json(nfts);
+  } catch (error) {
+    res
+      .status(500)
+      .json({ message: "Failed to fetch minted NFTs", error: error.message });
   }
 });
 
