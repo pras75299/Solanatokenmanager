@@ -159,6 +159,29 @@ app.get("/api/nfts", async (req, res) => {
   }
 });
 
+app.post("/api/transfer-nft", async (req, res) => {
+  const { mintAddress, recipientPublicKey } = req.body;
+
+  try {
+    // Securely load the sender's Keypair from backend storage
+    const senderKeypair = loadKeypair(); // or however you load the sender's keypair
+
+    // Call the transferNFT function
+    const transferResponse = await solanaService.transferNFT(
+      mintAddress,
+      senderKeypair,
+      recipientPublicKey
+    );
+
+    res.status(200).json({ message: transferResponse });
+  } catch (error) {
+    console.error("Transfer Error:", error.message);
+    res
+      .status(500)
+      .json({ message: "NFT transfer failed", error: error.message });
+  }
+});
+
 // MongoDB connection and server start
 const PORT = process.env.PORT || 5000;
 const MONGO_URI = process.env.MONGO_URI || "your-mongodb-uri-here";

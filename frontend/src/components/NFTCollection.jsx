@@ -2,10 +2,11 @@ import React, { useEffect, useState } from "react";
 
 const NFTCollection = ({ userPublicKey }) => {
   const [nfts, setNfts] = useState([]);
-  const [error, setError] = useState("");
+  const [transferAddress, setTransferAddress] = useState("");
+  const [transferMessage, setTransferMessage] = useState("");
+  const [selectedMintAddress, setSelectedMintAddress] = useState(null);
 
   useEffect(() => {
-    // Fetch NFTs from the backend, filtering by user's public key if provided
     const fetchNFTs = async () => {
       try {
         const response = await fetch(
@@ -16,14 +17,30 @@ const NFTCollection = ({ userPublicKey }) => {
         const data = await response.json();
         setNfts(data);
       } catch (err) {
-        setError("Failed to load NFTs");
+        console.error("Failed to load NFTs");
       }
     };
 
     fetchNFTs();
   }, [userPublicKey]);
 
-  if (error) return <p>{error}</p>;
+  const handleTransfer = async () => {
+    try {
+      const response = await fetch("http://localhost:5000/api/transfer-nft", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mintAddress: selectedMintAddress,
+          recipientPublicKey: transferAddress,
+        }),
+      });
+
+      const data = await response.json();
+      setTransferMessage(data.message || "Transfer successful!");
+    } catch (err) {
+      setTransferMessage("Failed to transfer NFT.");
+    }
+  };
 
   return (
     <div>
@@ -35,9 +52,26 @@ const NFTCollection = ({ userPublicKey }) => {
             <h4>{nft.name}</h4>
             <p>Symbol: {nft.symbol}</p>
             <p>Mint Address: {nft.mintAddress}</p>
+            <button onClick={() => setSelectedMintAddress(nft.mintAddress)}>
+              Transfer
+            </button>
           </div>
         ))}
       </div>
+
+      {selectedMintAddress && (
+        <div className="transfer-form">
+          <h4>Transfer NFT</h4>
+          <input
+            type="text"
+            placeholder="Recipient Address"
+            value={transferAddress}
+            onChange={(e) => setTransferAddress(e.target.value)}
+          />
+          <button onClick={handleTransfer}>Confirm Transfer</button>
+          {transferMessage && <p>{transferMessage}</p>}
+        </div>
+      )}
     </div>
   );
 };

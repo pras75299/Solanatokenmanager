@@ -340,6 +340,31 @@ const getTokenAccountBalance = async (tokenAccountAddress) => {
   }
 };
 
+const transferNFT = async (mintAddress, senderKeypair, recipientPublicKey) => {
+  try {
+    // Ensure mintAddress and recipientPublicKey are PublicKey instances
+    const mintPublicKey = new PublicKey(mintAddress);
+    const recipientPublicKeyInstance = new PublicKey(recipientPublicKey);
+
+    // Find the NFT by mint address
+    const nft = await metaplex
+      .nfts()
+      .findByMint({ mintAddress: mintPublicKey });
+
+    // Execute the transfer
+    const transferResult = await metaplex.nfts().transfer({
+      nftOrSft: nft,
+      toOwner: recipientPublicKeyInstance,
+    });
+
+    console.log("NFT Transfer successful:", transferResult.response.signature);
+    return `NFT Transfer successful, transaction signature: ${transferResult.response.signature}`;
+  } catch (error) {
+    console.error("NFT Transfer Error:", error.message);
+    throw new Error(`Failed to transfer NFT: ${error.message}`);
+  }
+};
+
 module.exports = {
   connection,
   payerKeypair,
@@ -351,4 +376,5 @@ module.exports = {
   airdropSolIfNeeded,
   mintToken2022,
   mintNFT,
+  transferNFT,
 };
