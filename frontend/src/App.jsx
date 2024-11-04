@@ -18,9 +18,12 @@ import MintNFT from "./components/MintNFT";
 import "@solana/wallet-adapter-react-ui/styles.css";
 import "./App.css";
 
+import NFTCollection from "./components/NFTCollection";
+
 function App() {
   const network = WalletAdapterNetwork.Devnet;
   const endpoint = useMemo(() => clusterApiUrl(network), [network]);
+  const { publicKey } = useWallet();
 
   const wallets = useMemo(
     () => [new PhantomWalletAdapter(), new SolflareWalletAdapter()],
@@ -41,6 +44,9 @@ function App() {
               <WalletInfo />
             </header>
             <MintNFT />
+            <NFTCollection
+              userPublicKey={publicKey ? publicKey.toBase58() : null}
+            />
           </div>
         </WalletModalProvider>
       </WalletProvider>
