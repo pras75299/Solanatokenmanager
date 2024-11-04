@@ -14,6 +14,7 @@ import {
   SolflareWalletAdapter,
 } from "@solana/wallet-adapter-wallets";
 import { clusterApiUrl, Connection, PublicKey } from "@solana/web3.js";
+import MintNFT from "./components/MintNFT";
 import "@solana/wallet-adapter-react-ui/styles.css";
 import "./App.css";
 
@@ -39,6 +40,7 @@ function App() {
 
               <WalletInfo />
             </header>
+            <MintNFT />
           </div>
         </WalletModalProvider>
       </WalletProvider>
