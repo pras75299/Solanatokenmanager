@@ -18,11 +18,49 @@ const {
   TOKEN_PROGRAM_ID,
   TOKEN_2022_PROGRAM_ID,
 } = require("@solana/spl-token");
+const { metaplex, payerKeypair } = require("./metaplex");
 const dotenv = require("dotenv");
 dotenv.config();
 
 // Connect to Solana devnet
 const connection = new Connection(clusterApiUrl("devnet"));
+
+//metamask
+
+// mintNFT
+// solanaService.js
+
+const mintNFT = async (recipientPublicKey, metadata) => {
+  try {
+    const recipientKey = new PublicKey(recipientPublicKey);
+
+    const { uri, name, symbol } = metadata;
+
+    // Call the Metaplex `create` method without `.run()`
+    const nft = await metaplex.nfts().create({
+      uri,
+      name,
+      symbol,
+      sellerFeeBasisPoints: 500, // 5% royalties
+      creators: [
+        {
+          address: payerKeypair.publicKey,
+          share: 100,
+        },
+      ],
+      updateAuthority: payerKeypair,
+    });
+
+    console.log(
+      "NFT created with Token Metadata program:",
+      nft.mintAddress.toString()
+    );
+    return `NFT minted successfully, Mint Address: ${nft.mintAddress.toString()}`;
+  } catch (error) {
+    console.error("NFT Minting Error:", error.message);
+    throw new Error(`Failed to mint NFT: ${error.message}`);
+  }
+};
 
 const getOrCreateMintAddress = async () => {
   if (fs.existsSync(MINT_ADDRESS_FILE)) {
@@ -54,7 +92,7 @@ if (!process.env.SOLANA_PRIVATE_KEY) {
 const secretKey = Uint8Array.from(
   Buffer.from(process.env.SOLANA_PRIVATE_KEY, "base64")
 );
-const payerKeypair = Keypair.fromSecretKey(secretKey);
+//const payerKeypair = Keypair.fromSecretKey(secretKey);
 // Function to get SOL balance of an address
 const getBalance = async (publicKey) => {
   try {
@@ -312,4 +350,5 @@ module.exports = {
   getOrCreateMintAddress,
   airdropSolIfNeeded,
   mintToken2022,
+  mintNFT,
 };

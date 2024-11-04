@@ -2,7 +2,10 @@ const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
 const dotenv = require("dotenv");
+
 const solanaService = require("./services/solanaService");
+const { mintNFT } = require("./services/solanaService");
+const { payerKeypair } = require("./services/metaplex");
 const { Keypair } = require("@solana/web3.js");
 const { PublicKey } = require("@solana/web3.js");
 const loadKeypair = require("./importKey");
@@ -97,6 +100,21 @@ app.post("/api/airdrop/:publicKey", async (req, res) => {
     res.status(200).json({ message });
   } catch (error) {
     res.status(500).json({ message: "Airdrop failed", error: error.message });
+  }
+});
+
+// mintNFT
+app.post("/api/mint-nft", async (req, res) => {
+  const { recipientPublicKey, metadata } = req.body;
+
+  try {
+    const result = await mintNFT(recipientPublicKey, metadata);
+    res.status(200).json({ message: result });
+  } catch (error) {
+    console.error("Error minting NFT:", error.message);
+    res
+      .status(500)
+      .json({ message: "NFT minting failed", error: error.message });
   }
 });
 
