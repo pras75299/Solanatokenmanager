@@ -1,4 +1,3 @@
-// src/components/MintNFT.js
 import React, { useState } from "react";
 
 const MintNFT = () => {
@@ -12,18 +11,21 @@ const MintNFT = () => {
     e.preventDefault();
 
     try {
-      const response = await fetch("http://localhost:5000/api/mint-nft", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          recipientPublicKey,
-          metadata: {
-            uri,
-            name,
-            symbol,
-          },
-        }),
-      });
+      const response = await fetch(
+        "https://solanatokenmanager.onrender.com/api/mint-nft",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            recipientPublicKey,
+            metadata: {
+              uri,
+              name,
+              symbol,
+            },
+          }),
+        }
+      );
 
       const data = await response.json();
       setMintMessage(data.message || "Minting successful!");

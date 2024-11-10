@@ -10,7 +10,7 @@ const NFTCollection = ({ userPublicKey }) => {
     const fetchNFTs = async () => {
       try {
         const response = await fetch(
-          `http://localhost:5000/api/nfts${
+          `https://solanatokenmanager.onrender.com/api/nfts${
             userPublicKey ? `?publicKey=${userPublicKey}` : ""
           }`
         );
@@ -26,14 +26,17 @@ const NFTCollection = ({ userPublicKey }) => {
 
   const handleTransfer = async () => {
     try {
-      const response = await fetch("http://localhost:5000/api/transfer-nft", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          mintAddress: selectedMintAddress,
-          recipientPublicKey: transferAddress,
-        }),
-      });
+      const response = await fetch(
+        "https://solanatokenmanager.onrender.com/api/transfer-nft",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            mintAddress: selectedMintAddress,
+            recipientPublicKey: transferAddress,
+          }),
+        }
+      );
 
       const data = await response.json();
       setTransferMessage(data.message || "Transfer successful!");

@@ -79,14 +79,17 @@ function WalletInfo() {
 
   const handleMintToken = async () => {
     try {
-      const response = await fetch("http://localhost:5000/api/mint-token", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          recipientPublicKey: publicKey.toBase58(),
-          tokenStandard,
-        }),
-      });
+      const response = await fetch(
+        "https://solanatokenmanager.onrender.com/api/mint-token",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            recipientPublicKey: publicKey.toBase58(),
+            tokenStandard,
+          }),
+        }
+      );
       const data = await response.json();
       setMintMessage(data.message || "Minting successful!");
     } catch (err) {
@@ -97,7 +100,7 @@ function WalletInfo() {
   const handleTransferTokens = async () => {
     try {
       const response = await fetch(
-        "http://localhost:5000/api/transfer-tokens",
+        "https://solanatokenmanager.onrender.com/api/transfer-tokens",
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
