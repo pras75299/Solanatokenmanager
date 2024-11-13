@@ -1,10 +1,8 @@
-// importKey.js
-
 const { Keypair } = require("@solana/web3.js");
 const dotenv = require("dotenv");
 const fs = require("fs");
 const path = require("path");
-
+const { Connection, PublicKey } = require("@solana/web3.js");
 dotenv.config();
 
 /**
@@ -12,7 +10,7 @@ dotenv.config();
  * @returns {Keypair} The Keypair instance created from the secret key.
  * @throws Will throw an error if the private key is not available or malformed.
  */
-function loadKeypair() {
+const loadKeypair = () => {
   let secretKey;
 
   if (process.env.SOLANA_PRIVATE_KEY) {
@@ -58,6 +56,47 @@ function loadKeypair() {
   }
 
   return Keypair.fromSecretKey(secretKey);
-}
+};
+
+const getTokenAccountsAndMintAddresses = async (publicAddress) => {
+  try {
+    // Set up a connection to the Solana devnet or mainnet
+    const connection = new Connection("https://api.devnet.solana.com"); // Use mainnet URL if needed
+    const ownerPublicKey = new PublicKey(publicAddress);
+
+    // Fetch all token accounts owned by this public address
+    const tokenAccounts = await connection.getParsedTokenAccountsByOwner(
+      ownerPublicKey,
+      {
+        programId: new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"), // SPL Token Program ID
+      }
+    );
+
+    // Extract and print each token account's mint address and balance
+    const mintAddresses = [];
+    tokenAccounts.value.forEach((accountInfo) => {
+      const accountData = accountInfo.account.data.parsed.info;
+      const mintAddress = accountData.mint;
+      const tokenBalance = accountData.tokenAmount.uiAmount;
+
+      mintAddresses.push({
+        mintAddress,
+        balance: tokenBalance,
+      });
+      console.log(`Mint Address: ${mintAddress}, Balance: ${tokenBalance}`);
+    });
+
+    return mintAddresses;
+  } catch (error) {
+    console.error("Error fetching token accounts:", error);
+    return [];
+  }
+};
+
+// Example usage
+// const publicAddress = "publicaddress";
+// getTokenAccountsAndMintAddresses(publicAddress).then((result) => {
+//   console.log("Mint Addresses and Balances:", result);
+// });
 
 module.exports = loadKeypair;

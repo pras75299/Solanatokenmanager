@@ -37,6 +37,19 @@ exports.getMintedNFTs = async (req, res) => {
   }
 };
 
+exports.fetchNFTs = async (req, res) => {
+  const { publicKey } = req.query;
+  try {
+    const query = publicKey ? { recipientPublicKey: publicKey } : {};
+    const nfts = await NFT.find(query);
+    res.status(200).json(nfts);
+  } catch (error) {
+    res
+      .status(500)
+      .json({ message: "Failed to fetch NFTs", error: error.message });
+  }
+};
+
 exports.transferNFT = async (req, res) => {
   const { mintAddress, recipientPublicKey } = req.body;
 

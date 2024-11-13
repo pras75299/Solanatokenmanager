@@ -10,6 +10,9 @@ const {
   Transaction,
 } = require("@solana/web3.js");
 const {
+  burn,
+  approve,
+  closeAccount,
   createMint,
   mintTo,
   getAccount,
@@ -365,6 +368,113 @@ const transferNFT = async (mintAddress, senderKeypair, recipientPublicKey) => {
   }
 };
 
+const burnToken = async (mintAddress, ownerWallet, amount) => {
+  try {
+    const mintPublicKey = new PublicKey(mintAddress);
+
+    const ownerTokenAccount = await getOrCreateAssociatedTokenAccount(
+      connection,
+      ownerWallet,
+      mintPublicKey,
+      ownerWallet.publicKey
+    );
+
+    const accountInfo = await getAccount(connection, ownerTokenAccount.address);
+    const balance = accountInfo.amount;
+    const amountBigInt = BigInt(amount) * BigInt(10 ** 9);
+
+    if (balance < amountBigInt) {
+      throw new Error(
+        `Insufficient token balance: Available balance is ${
+          balance / BigInt(10 ** 9)
+        } tokens, requested ${amount} tokens`
+      );
+    }
+
+    const transactionSignature = await burn(
+      connection,
+      ownerWallet,
+      ownerTokenAccount.address,
+      mintPublicKey,
+      ownerWallet,
+      amountBigInt
+    );
+
+    console.log("Burn Transaction Signature:", transactionSignature);
+    return `Burn successful, transaction signature: ${transactionSignature}`;
+  } catch (error) {
+    console.error("Error in burnToken:", error.message);
+    throw new Error(`Failed to burn token: ${error.message}`);
+  }
+};
+
+const delegateToken = async (
+  mintAddress,
+  ownerWallet,
+  delegatePublicKey,
+  amount
+) => {
+  try {
+    const mintPublicKey = new PublicKey(mintAddress);
+    const delegateKey = new PublicKey(delegatePublicKey);
+
+    // Ensure we have the owner's associated token account for this mint
+    const ownerTokenAccount = await getOrCreateAssociatedTokenAccount(
+      connection,
+      ownerWallet,
+      mintPublicKey,
+      ownerWallet.publicKey // ownerWallet is the authority here
+    );
+
+    // Convert amount to BigInt with the appropriate decimals (assuming 9 decimals)
+    const amountBigInt = BigInt(amount) * BigInt(10 ** 9);
+
+    // Approve delegation
+    const transactionSignature = await approve(
+      connection,
+      ownerWallet,
+      ownerTokenAccount.address,
+      delegateKey,
+      ownerWallet, // Owner is the signer
+      amountBigInt
+    );
+
+    console.log("Delegation Transaction Signature:", transactionSignature);
+    return `Delegation successful, transaction signature: ${transactionSignature}`;
+  } catch (error) {
+    console.error("Error in delegateToken:", error.message);
+    throw new Error(`Failed to delegate token: ${error.message}`);
+  }
+};
+
+const closeTokenAccount = async (mintAddress, ownerWallet) => {
+  try {
+    const mintPublicKey = new PublicKey(mintAddress);
+
+    // Get or create the associated token account for this mint and wallet
+    const tokenAccount = await getOrCreateAssociatedTokenAccount(
+      connection,
+      ownerWallet,
+      mintPublicKey,
+      ownerWallet.publicKey // Closing account needs the owner's public key
+    );
+
+    // Close the token account
+    const transactionSignature = await closeAccount(
+      connection,
+      ownerWallet,
+      tokenAccount.address, // The token account to close
+      ownerWallet.publicKey, // The destination of remaining balance, if any
+      ownerWallet
+    );
+
+    return `Token account closed successfully, transaction signature: ${transactionSignature}`;
+  } catch (error) {
+    console.error("Error in closeTokenAccount:", error);
+    throw new Error(`Failed to close token account: ${error.message}`);
+  }
+};
+
 module.exports = {
   connection,
   payerKeypair,
@@ -377,4 +487,7 @@ module.exports = {
   mintToken2022,
   mintNFT,
   transferNFT,
+  burnToken,
+  delegateToken,
+  closeTokenAccount,
 };
