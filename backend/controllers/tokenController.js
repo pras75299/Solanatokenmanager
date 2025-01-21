@@ -4,6 +4,12 @@ const loadKeypair = require("../importKey");
 
 exports.mintToken = async (req, res) => {
   const { recipientPublicKey, tokenStandard } = req.body;
+  if (!recipientPublicKey) {
+    return res.status(400).json({
+      success: false,
+      message: "Recipient public key is required",
+    });
+  }
   try {
     const recipientKey = new PublicKey(recipientPublicKey);
     let result;
@@ -23,6 +29,12 @@ exports.mintToken = async (req, res) => {
 // Controller for transferring tokens
 exports.transferTokens = async (req, res) => {
   const { mintAddress, toWallet, amount, tokenStandard } = req.body;
+  if (!mintAddress || !toWallet || !amount) {
+    return res.status(400).json({
+      success: false,
+      message: "Missing required fields: mintAddress, toWallet, or amount",
+    });
+  }
   try {
     const fromWallet = loadKeypair();
     const transferResponse = await solanaService.transferTokens(
