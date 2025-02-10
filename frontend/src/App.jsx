@@ -54,7 +54,6 @@ const App = () => {
                   <Navbar />
                 </ErrorBoundary>
                 <div className="container mx-auto px-4 py-8">
-                  DashboardPage
                   <Routes>
                     <Route path="/" element={<WalletInfo />} />
                     <Route path="/mint-nft" element={<MintNFT />} />
