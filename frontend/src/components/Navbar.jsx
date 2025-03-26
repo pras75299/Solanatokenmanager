@@ -37,7 +37,9 @@ export default function Navbar() {
       <div className="flex items-center justify-between max-w-7xl mx-auto">
         <div className="flex items-center flex-1">
           <Link to="/" className="flex items-center space-x-2">
-            <span className="text-white font-semibold">TokenManager</span>
+            <span className="text-white font-semibold text-3xl">
+              Token Manager
+            </span>
           </Link>
 
           {/* Mobile Connect Wallet */}
@@ -52,6 +54,8 @@ export default function Navbar() {
           <NavLink to="/burn" label="Burn" />
           <NavLink to="/delegate" label="Delegate" />
           <NavLink to="/create-token" label="Create Token" />
+          <NavLink to="/mint-nft" label="Mint NFT" />
+          <NavLink to="/nft-collection" label="NFT Collection" />
         </div>
 
         {/* Desktop Connect Wallet */}
