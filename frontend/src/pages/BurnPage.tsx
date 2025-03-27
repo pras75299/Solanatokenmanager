@@ -1,20 +1,32 @@
 import React, { useState } from "react";
-import { useWallet } from "@solana/wallet-adapter-react";
+import { useWallet, useConnection } from "@solana/wallet-adapter-react";
 import { Loader2, Flame, Info } from "lucide-react";
 import toast from "react-hot-toast";
 import GlowingCard from "../components/GlowingCard";
+import {
+  PublicKey,
+  Transaction,
+  sendAndConfirmTransaction,
+} from "@solana/web3.js";
+import {
+  TOKEN_PROGRAM_ID,
+  createBurnInstruction,
+  getAssociatedTokenAddress,
+  getAccount,
+} from "@solana/spl-token";
 
 const BurnPage = () => {
-  const { publicKey, connected } = useWallet();
+  const { publicKey, connected, signTransaction } = useWallet();
+  const { connection } = useConnection();
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     tokenAddress: "",
     amount: "",
   });
 
-  const handleBurnToken = async (e) => {
+  const handleBurnToken = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!connected) {
+    if (!connected || !publicKey || !signTransaction) {
       toast.error("Please connect your wallet first");
       return;
     }
@@ -26,12 +38,76 @@ const BurnPage = () => {
 
     try {
       setLoading(true);
-      // Burn token logic will go here
-      await new Promise((resolve) => setTimeout(resolve, 2000)); // Simulated delay
-      toast.success("Token burned successfully!");
+
+      // Validate token address
+      let mintPubkey: PublicKey;
+      try {
+        mintPubkey = new PublicKey(formData.tokenAddress);
+      } catch (error) {
+        toast.error("Invalid token address");
+        return;
+      }
+
+      // Get the associated token account
+      const associatedTokenAddress = await getAssociatedTokenAddress(
+        mintPubkey,
+        publicKey
+      );
+
+      // Verify token account exists and has enough balance
+      try {
+        const tokenAccount = await getAccount(
+          connection,
+          associatedTokenAddress
+        );
+        const currentBalance = Number(tokenAccount.amount);
+        const burnAmount = Number(formData.amount);
+
+        if (currentBalance < burnAmount) {
+          toast.error("Insufficient token balance");
+          return;
+        }
+      } catch (error) {
+        toast.error("Token account not found. Make sure you own this token.");
+        return;
+      }
+
+      // Create burn instruction
+      const burnInstruction = createBurnInstruction(
+        associatedTokenAddress,
+        mintPubkey,
+        publicKey,
+        Number(formData.amount)
+      );
+
+      // Create and send transaction
+      const transaction = new Transaction().add(burnInstruction);
+      transaction.feePayer = publicKey;
+      transaction.recentBlockhash = (
+        await connection.getLatestBlockhash()
+      ).blockhash;
+
+      // Sign and send transaction
+      const signedTransaction = await signTransaction(transaction);
+      const signature = await connection.sendRawTransaction(
+        signedTransaction.serialize()
+      );
+
+      // Wait for confirmation
+      const confirmation = await connection.confirmTransaction(
+        signature,
+        "confirmed"
+      );
+
+      if (confirmation.value.err) {
+        throw new Error("Transaction failed");
+      }
+
+      toast.success("Tokens burned successfully!");
       setFormData({ tokenAddress: "", amount: "" });
     } catch (error) {
-      toast.error(error.message || "Failed to burn token");
+      console.error("Burn error:", error);
+      toast.error(error.message || "Failed to burn tokens");
     } finally {
       setLoading(false);
     }

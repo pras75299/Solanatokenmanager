@@ -168,12 +168,23 @@ const TokensPage: React.FC = () => {
                     <p className="text-gray-400">{token.symbol}</p>
                   </div>
                   <div className="text-right">
-                    <p className="text-2xl font-bold text-white">
+                    <p
+                      className={`text-2xl font-bold ${
+                        token.balance === 0 ? "text-red-400" : "text-white"
+                      }`}
+                    >
                       {token.balance.toLocaleString()}
                     </p>
-                    <p className="text-gray-400 text-sm">
-                      Decimals: {token.decimals}
-                    </p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-gray-400 text-sm">
+                        Decimals: {token.decimals}
+                      </p>
+                      {token.balance === 0 && (
+                        <span className="text-xs bg-red-500/10 text-red-400 px-2 py-1 rounded-full">
+                          No Balance
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
 
