@@ -33,7 +33,8 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import DashboardPage from "./pages/DashboardPage";
 import BurnPage from "./pages/BurnPage";
 import DelegatePage from "./pages/DelegatePage";
-import CreateTokenPage from "./pages/CreateTokenPage";
+import MintTokenPage from "./pages/MintTokenPage";
+import TokensPage from "./pages/TokensPage";
 
 // Protected Route Component
 const ProtectedRoute = ({ children }) => {
@@ -136,19 +137,28 @@ const App = () => {
                         </ProtectedRoute>
                       }
                     />
-                    <Route
-                      path="/create-token"
-                      element={
-                        <ProtectedRoute>
-                          <CreateTokenPage />
-                        </ProtectedRoute>
-                      }
-                    />
+
                     <Route
                       path="/nft-collection"
                       element={
                         <ProtectedRoute>
                           <NFTCollectionPage />
+                        </ProtectedRoute>
+                      }
+                    />
+                    <Route
+                      path="/mint-token"
+                      element={
+                        <ProtectedRoute>
+                          <MintTokenPage />
+                        </ProtectedRoute>
+                      }
+                    />
+                    <Route
+                      path="/tokens"
+                      element={
+                        <ProtectedRoute>
+                          <TokensPage />
                         </ProtectedRoute>
                       }
                     />

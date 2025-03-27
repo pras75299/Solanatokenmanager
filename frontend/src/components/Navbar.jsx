@@ -53,8 +53,9 @@ export default function Navbar() {
           <NavLink to="/dashboard" label="Dashboard" />
           <NavLink to="/burn" label="Burn" />
           <NavLink to="/delegate" label="Delegate" />
-          <NavLink to="/create-token" label="Create Token" />
           <NavLink to="/mint-nft" label="Mint NFT" />
+          <NavLink to="/mint-token" label="Mint Token" />
+          <NavLink to="/tokens" label="Tokens" />
           <NavLink to="/nft-collection" label="NFT Collection" />
         </div>
 
@@ -102,8 +103,18 @@ export default function Navbar() {
               onClick={() => setIsOpen(false)}
             />
             <MobileNavLink
-              to="/create-token"
-              label="Create Token"
+              to="/mint-token"
+              label="Mint Token"
+              onClick={() => setIsOpen(false)}
+            />
+            <MobileNavLink
+              to="/tokens"
+              label="Tokens"
+              onClick={() => setIsOpen(false)}
+            />
+            <MobileNavLink
+              to="/nft-collection"
+              label="NFT Collection"
               onClick={() => setIsOpen(false)}
             />
           </div>
