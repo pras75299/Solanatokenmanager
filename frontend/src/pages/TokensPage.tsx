@@ -1,15 +1,27 @@
 import React, { useState, useEffect } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { motion } from "framer-motion";
-import { Loader2, RefreshCw, ExternalLink, Copy, Coins } from "lucide-react";
+import {
+  Loader2,
+  RefreshCw,
+  ExternalLink,
+  Copy,
+  Coins,
+  Flame,
+  X,
+  Trash2,
+} from "lucide-react";
 import toast from "react-hot-toast";
 import GlowingCard from "../components/GlowingCard";
-import { Connection, PublicKey } from "@solana/web3.js";
+import { useLocation } from "react-router-dom";
+import { Connection, PublicKey, Transaction } from "@solana/web3.js";
 import {
   TOKEN_PROGRAM_ID,
   getAccount,
   getAssociatedTokenAddress,
   getMint,
+  createBurnInstruction,
+  createCloseAccountInstruction,
 } from "@solana/spl-token";
 
 interface TokenInfo {
@@ -20,11 +32,87 @@ interface TokenInfo {
   decimals: number;
 }
 
+interface DeleteModalProps {
+  token: TokenInfo;
+  onClose: () => void;
+  onConfirm: () => Promise<void>;
+}
+
+const DeleteModal: React.FC<DeleteModalProps> = ({
+  token,
+  onClose,
+  onConfirm,
+}) => {
+  const [loading, setLoading] = useState(false);
+
+  const handleDelete = async () => {
+    setLoading(true);
+    try {
+      await onConfirm();
+    } catch (error) {
+      console.error("Error in delete confirmation:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div className="bg-[#1F242D] rounded-lg p-6 max-w-md w-full mx-4">
+        <div className="flex justify-between items-center mb-4">
+          <h3 className="text-xl font-semibold text-white">Delete Token</h3>
+          <button
+            onClick={onClose}
+            className="p-1 hover:bg-[#2A303C] rounded-full transition-colors"
+          >
+            <X className="w-5 h-5 text-gray-400" />
+          </button>
+        </div>
+
+        <div className="bg-[#2A303C] rounded-lg p-4 mb-6">
+          <p className="text-gray-300">
+            Are you sure you want to delete {token.name} from your token list?
+            This will close the token account. This action cannot be undone.
+          </p>
+        </div>
+
+        <div className="flex gap-4">
+          <button
+            onClick={onClose}
+            className="flex-1 px-4 py-2 bg-[#2A303C] text-gray-300 rounded-lg hover:bg-[#353D4B] transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleDelete}
+            disabled={loading}
+            className="flex-1 flex items-center justify-center gap-2 bg-red-500 text-white py-2 rounded-lg transition-all duration-200 hover:bg-red-600"
+          >
+            {loading ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Deleting...
+              </>
+            ) : (
+              <>
+                <Trash2 className="w-4 h-4" />
+                Delete
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const TokensPage: React.FC = () => {
-  const { publicKey, connected } = useWallet();
+  const { publicKey, connected, signTransaction } = useWallet();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [tokens, setTokens] = useState<TokenInfo[]>([]);
+  const [tokenToDelete, setTokenToDelete] = useState<TokenInfo | null>(null);
+  const location = useLocation();
 
   const copyToClipboard = async (text: string) => {
     try {
@@ -49,34 +137,62 @@ const TokensPage: React.FC = () => {
         "confirmed"
       );
 
+      console.log("Fetching token accounts for wallet:", publicKey.toString());
+
       // Get all token accounts for the wallet
       const tokenAccounts = await connection.getParsedTokenAccountsByOwner(
         publicKey,
         { programId: TOKEN_PROGRAM_ID }
       );
 
+      console.log("Found token accounts:", tokenAccounts.value.length);
+
       // Fetch details for each token
       const tokenPromises = tokenAccounts.value.map(async (tokenAccount) => {
         const parsedInfo = tokenAccount.account.data.parsed.info;
         const mintAddress = parsedInfo.mint;
-        const balance = parsedInfo.tokenAmount.uiAmount;
 
         try {
+          // Get mint info first
           const mintInfo = await getMint(
             connection,
             new PublicKey(mintAddress)
           );
 
-          // Try to get token metadata from your backend or use default values
+          // Get fresh token account data to ensure accurate balance
+          const tokenAccountAddress = await getAssociatedTokenAddress(
+            new PublicKey(mintAddress),
+            publicKey
+          );
+
+          const freshTokenAccount = await getAccount(
+            connection,
+            tokenAccountAddress,
+            "finalized" // Use finalized commitment for accurate balance
+          );
+
+          // Calculate actual balance considering decimals
+          const rawBalance = Number(freshTokenAccount.amount);
+          const actualBalance = rawBalance / Math.pow(10, mintInfo.decimals);
+
+          console.log(`Token ${mintAddress} balance:`, {
+            raw: rawBalance,
+            actual: actualBalance,
+            decimals: mintInfo.decimals,
+          });
+
           return {
             mintAddress,
             name: `Token ${mintAddress.slice(0, 4)}...${mintAddress.slice(-4)}`,
             symbol: "TOKEN",
-            balance,
+            balance: actualBalance,
             decimals: mintInfo.decimals,
           };
         } catch (error) {
-          console.error(`Error fetching mint info for ${mintAddress}:`, error);
+          console.error(
+            `Error fetching details for token ${mintAddress}:`,
+            error
+          );
           return null;
         }
       });
@@ -85,7 +201,16 @@ const TokensPage: React.FC = () => {
       const validTokens = tokenResults.filter(
         (token): token is TokenInfo => token !== null
       );
-      setTokens(validTokens);
+
+      // Sort tokens: non-zero balances first, then zero balances
+      const sortedTokens = validTokens.sort((a, b) => {
+        if (a.balance === 0 && b.balance > 0) return 1;
+        if (a.balance > 0 && b.balance === 0) return -1;
+        return b.balance - a.balance; // Secondary sort by balance amount
+      });
+
+      console.log("Final processed tokens:", sortedTokens);
+      setTokens(sortedTokens);
     } catch (error) {
       console.error("Error fetching tokens:", error);
       toast.error("Failed to fetch tokens");
@@ -100,8 +225,97 @@ const TokensPage: React.FC = () => {
     setRefreshing(false);
   };
 
+  const handleDeleteToken = async (token: TokenInfo) => {
+    if (!connected || !publicKey || !signTransaction) {
+      toast.error("Please connect your wallet first");
+      return;
+    }
+
+    const toastId = toast.loading("Processing delete transaction...");
+
+    try {
+      const connection = new Connection(
+        "https://api.devnet.solana.com",
+        "confirmed"
+      );
+      const mintPubkey = new PublicKey(token.mintAddress);
+
+      // Get the associated token account
+      const associatedTokenAddress = await getAssociatedTokenAddress(
+        mintPubkey,
+        publicKey
+      );
+
+      // Verify token account exists and has zero balance
+      const tokenAccount = await getAccount(connection, associatedTokenAddress);
+      const currentBalance = Number(tokenAccount.amount);
+
+      if (currentBalance > 0) {
+        toast.error("Cannot delete token with non-zero balance", {
+          id: toastId,
+        });
+        return;
+      }
+
+      // Create close account instruction
+      const closeInstruction = createCloseAccountInstruction(
+        associatedTokenAddress, // account to close
+        publicKey, // destination
+        publicKey, // authority
+        [] // multisig signers (empty array if not multisig)
+      );
+
+      // Create and send transaction
+      const transaction = new Transaction().add(closeInstruction);
+      transaction.feePayer = publicKey;
+      transaction.recentBlockhash = (
+        await connection.getLatestBlockhash()
+      ).blockhash;
+
+      // Sign and send transaction
+      const signedTransaction = await signTransaction(transaction);
+      const signature = await connection.sendRawTransaction(
+        signedTransaction.serialize()
+      );
+
+      // Wait for confirmation
+      toast.loading("Waiting for confirmation...", { id: toastId });
+      const confirmation = await connection.confirmTransaction(
+        signature,
+        "finalized"
+      );
+
+      if (confirmation.value.err) {
+        throw new Error("Transaction failed");
+      }
+
+      toast.success("Token deleted successfully!", { id: toastId });
+      await handleRefresh(); // Refresh the token list
+    } catch (error) {
+      console.error("Delete error:", error);
+      toast.error(error.message || "Failed to delete token", { id: toastId });
+    } finally {
+      setTokenToDelete(null); // Close the modal
+    }
+  };
+
+  // Refresh tokens when navigating from burn page
   useEffect(() => {
-    fetchTokens();
+    const fromBurn = location.state?.fromBurn;
+    if (fromBurn && connected && publicKey) {
+      console.log("Detected navigation from burn page, refreshing tokens");
+      // Add a small delay to ensure blockchain state is updated
+      setTimeout(() => {
+        handleRefresh();
+      }, 2000);
+    }
+  }, [location.state]);
+
+  // Initial fetch and wallet connection changes
+  useEffect(() => {
+    if (connected && publicKey) {
+      fetchTokens();
+    }
   }, [publicKey, connected]);
 
   if (!connected) {
@@ -180,9 +394,13 @@ const TokensPage: React.FC = () => {
                         Decimals: {token.decimals}
                       </p>
                       {token.balance === 0 && (
-                        <span className="text-xs bg-red-500/10 text-red-400 px-2 py-1 rounded-full">
-                          No Balance
-                        </span>
+                        <button
+                          onClick={() => setTokenToDelete(token)}
+                          className="text-xs bg-red-500/10 text-red-400 px-2 py-1 rounded-full hover:bg-red-500/20 transition-colors flex items-center gap-1"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                          Delete
+                        </button>
                       )}
                     </div>
                   </div>
@@ -221,6 +439,14 @@ const TokensPage: React.FC = () => {
             </GlowingCard>
           ))}
         </div>
+      )}
+
+      {tokenToDelete && (
+        <DeleteModal
+          token={tokenToDelete}
+          onClose={() => setTokenToDelete(null)}
+          onConfirm={() => handleDeleteToken(tokenToDelete)}
+        />
       )}
     </div>
   );
