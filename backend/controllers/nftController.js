@@ -201,3 +201,47 @@ exports.uploadImage = async (req, res) => {
     });
   }
 };
+
+exports.refreshMetadata = async (req, res) => {
+  const { mintAddress } = req.params;
+
+  if (!mintAddress) {
+    return res.status(400).json({
+      success: false,
+      message: "Mint address is required",
+    });
+  }
+
+  try {
+    // Find the NFT in our database
+    const nft = await NFT.findOne({ mintAddress });
+    if (!nft) {
+      return res.status(404).json({
+        success: false,
+        message: "NFT not found",
+      });
+    }
+
+    // Fetch latest metadata from Solana
+    const updatedMetadata = await solanaService.getNFTMetadata(mintAddress);
+
+    // Update the NFT in our database with new metadata
+    nft.name = updatedMetadata.name;
+    nft.symbol = updatedMetadata.symbol;
+    nft.uri = updatedMetadata.uri;
+    await nft.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "NFT metadata refreshed successfully",
+      data: nft,
+    });
+  } catch (error) {
+    console.error("Metadata Refresh Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to refresh NFT metadata",
+      error: error.message,
+    });
+  }
+};

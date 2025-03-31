@@ -475,6 +475,41 @@ const closeTokenAccount = async (mintAddress, ownerWallet) => {
   }
 };
 
+const getNFTMetadata = async (mintAddress) => {
+  try {
+    // Convert mintAddress to PublicKey
+    const mintPublicKey = new PublicKey(mintAddress);
+
+    // Fetch the NFT data using Metaplex
+    const nft = await metaplex
+      .nfts()
+      .findByMint({ mintAddress: mintPublicKey });
+
+    if (!nft) {
+      throw new Error("NFT not found on Solana");
+    }
+
+    // Get the JSON metadata from the URI
+    const response = await fetch(nft.uri);
+    if (!response.ok) {
+      throw new Error("Failed to fetch NFT metadata from URI");
+    }
+
+    const metadata = await response.json();
+
+    return {
+      name: metadata.name || nft.name,
+      symbol: metadata.symbol || nft.symbol,
+      uri: metadata.image || nft.uri,
+      description: metadata.description,
+      attributes: metadata.attributes,
+    };
+  } catch (error) {
+    console.error("Error fetching NFT metadata:", error);
+    throw new Error(`Failed to fetch NFT metadata: ${error.message}`);
+  }
+};
+
 module.exports = {
   connection,
   payerKeypair,
@@ -490,4 +525,5 @@ module.exports = {
   burnToken,
   delegateToken,
   closeTokenAccount,
+  getNFTMetadata,
 };
