@@ -4,6 +4,7 @@ import { motion } from "framer-motion";
 import { Loader2, Send, Info, X, RefreshCw } from "lucide-react";
 import toast from "react-hot-toast";
 import GlowingCard from "../components/GlowingCard";
+import { useLocation } from "react-router-dom";
 
 interface NFT {
   mintAddress: string;
@@ -21,6 +22,7 @@ const NFTCollectionPage = () => {
   const [selectedNFT, setSelectedNFT] = useState<NFT | null>(null);
   const [isTransferring, setIsTransferring] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const location = useLocation();
 
   const fetchNFTs = async () => {
     if (!connected || !publicKey) {
@@ -31,37 +33,56 @@ const NFTCollectionPage = () => {
 
     try {
       setLoading(true);
+      console.log("Fetching NFTs for wallet:", publicKey.toString());
+
       // First, get the NFT mint addresses for the wallet
       const response = await fetch(
         `https://solanatokenmanager.onrender.com/api/nfts/${publicKey.toString()}`
       );
 
       if (!response.ok) {
+        const errorText = await response.text();
+        console.error("Failed to fetch NFTs. API response:", errorText);
         throw new Error("Failed to fetch NFTs");
       }
 
       const data = await response.json();
+      console.log("NFT data from API:", data);
+
+      if (!data || !Array.isArray(data) || data.length === 0) {
+        console.log("No NFTs found for this wallet");
+        setNfts([]);
+        setLoading(false);
+        return;
+      }
 
       // For each NFT, fetch its metadata
       const nftPromises = data.map(async (nftData: any) => {
         try {
+          console.log("Fetching metadata for NFT:", nftData.mintAddress);
           const metadataResponse = await fetch(
             `https://solanatokenmanager.onrender.com/api/nft-metadata/${nftData.mintAddress}`
           );
 
           if (!metadataResponse.ok) {
+            console.error(
+              `Metadata fetch failed for ${nftData.mintAddress}:`,
+              await metadataResponse.text()
+            );
             throw new Error(
               `Failed to fetch metadata for NFT ${nftData.mintAddress}`
             );
           }
 
           const metadata = await metadataResponse.json();
+          console.log("Received metadata:", metadata);
+
           return {
             mintAddress: nftData.mintAddress,
-            name: metadata.name,
+            name: metadata.name || "Unnamed NFT",
             symbol: metadata.symbol || "NFT",
-            uri: metadata.image,
-            description: metadata.description,
+            uri: metadata.image || "",
+            description: metadata.description || "",
           };
         } catch (error) {
           console.error(
@@ -73,7 +94,18 @@ const NFTCollectionPage = () => {
       });
 
       const nftResults = await Promise.all(nftPromises);
-      const validNfts = nftResults.filter((nft): nft is NFT => nft !== null);
+      const validNfts = nftResults.filter(
+        (
+          nft
+        ): nft is {
+          mintAddress: string;
+          name: string;
+          symbol: string;
+          uri: string;
+          description: string;
+        } => nft !== null
+      ) as NFT[];
+      console.log("Valid NFTs after metadata fetch:", validNfts.length);
       setNfts(validNfts);
     } catch (error) {
       toast.error("Failed to load NFTs");
@@ -86,6 +118,15 @@ const NFTCollectionPage = () => {
   useEffect(() => {
     fetchNFTs();
   }, [publicKey, connected]);
+
+  // Refresh NFTs when navigating from the mint page
+  useEffect(() => {
+    const fromMintPage = location.state?.fromMintPage;
+    if (fromMintPage && connected && publicKey) {
+      console.log("Detected navigation from mint page, refreshing NFTs");
+      fetchNFTs();
+    }
+  }, [location]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -206,7 +247,7 @@ const NFTCollectionPage = () => {
           {nfts.map((nft) => (
             <GlowingCard key={nft.mintAddress}>
               <div className="space-y-4">
-                <div className="aspect-square rounded-lg overflow-hidden bg-[#2A303C]">
+                <div className="aspect-square rounded-lg overflow-hidden bg-[#2A303C] relative">
                   <img
                     src={nft.uri}
                     alt={nft.name}
@@ -216,6 +257,13 @@ const NFTCollectionPage = () => {
                         "https://placehold.co/400x400?text=NFT";
                     }}
                   />
+                  <button
+                    onClick={() => handleNFTRefresh(nft.mintAddress)}
+                    className="absolute top-2 right-2 bg-gray-800/80 p-2 rounded-full hover:bg-gray-700/80 transition-colors"
+                    title="Refresh metadata"
+                  >
+                    <RefreshCw className="w-4 h-4 text-white" />
+                  </button>
                 </div>
                 <div>
                   <h3 className="text-xl font-semibold text-white mb-1">
