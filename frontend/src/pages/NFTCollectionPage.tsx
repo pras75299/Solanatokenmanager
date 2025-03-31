@@ -35,9 +35,9 @@ const NFTCollectionPage = () => {
       setLoading(true);
       console.log("Fetching NFTs for wallet:", publicKey.toString());
 
-      // First, get the NFT mint addresses for the wallet
+      // Get NFTs for the wallet using the correct endpoint
       const response = await fetch(
-        `https://solanatokenmanager.onrender.com/api/nfts/${publicKey.toString()}`
+        `https://solanatokenmanager.onrender.com/api/nfts?publicKey=${publicKey.toString()}`
       );
 
       if (!response.ok) {
@@ -56,56 +56,16 @@ const NFTCollectionPage = () => {
         return;
       }
 
-      // For each NFT, fetch its metadata
-      const nftPromises = data.map(async (nftData: any) => {
-        try {
-          console.log("Fetching metadata for NFT:", nftData.mintAddress);
-          const metadataResponse = await fetch(
-            `https://solanatokenmanager.onrender.com/api/nft-metadata/${nftData.mintAddress}`
-          );
+      // The NFTs from the API already contain all the metadata we need
+      const validNfts = data.map((nft) => ({
+        mintAddress: nft.mintAddress,
+        name: nft.name || "Unnamed NFT",
+        symbol: nft.symbol || "NFT",
+        uri: nft.uri || "",
+        description: nft.description || "",
+      }));
 
-          if (!metadataResponse.ok) {
-            console.error(
-              `Metadata fetch failed for ${nftData.mintAddress}:`,
-              await metadataResponse.text()
-            );
-            throw new Error(
-              `Failed to fetch metadata for NFT ${nftData.mintAddress}`
-            );
-          }
-
-          const metadata = await metadataResponse.json();
-          console.log("Received metadata:", metadata);
-
-          return {
-            mintAddress: nftData.mintAddress,
-            name: metadata.name || "Unnamed NFT",
-            symbol: metadata.symbol || "NFT",
-            uri: metadata.image || "",
-            description: metadata.description || "",
-          };
-        } catch (error) {
-          console.error(
-            `Error fetching metadata for NFT ${nftData.mintAddress}:`,
-            error
-          );
-          return null;
-        }
-      });
-
-      const nftResults = await Promise.all(nftPromises);
-      const validNfts = nftResults.filter(
-        (
-          nft
-        ): nft is {
-          mintAddress: string;
-          name: string;
-          symbol: string;
-          uri: string;
-          description: string;
-        } => nft !== null
-      ) as NFT[];
-      console.log("Valid NFTs after metadata fetch:", validNfts.length);
+      console.log("Valid NFTs:", validNfts.length);
       setNfts(validNfts);
     } catch (error) {
       toast.error("Failed to load NFTs");

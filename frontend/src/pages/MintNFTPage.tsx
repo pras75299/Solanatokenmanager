@@ -26,8 +26,19 @@ interface FormData {
 interface MintResponse {
   success: boolean;
   message?: string;
-  mintAddress?: string;
-  txid?: string;
+  data?: {
+    mintAddress: string;
+    txid?: string;
+    nft?: {
+      recipientPublicKey: string;
+      mintAddress: string;
+      uri: string;
+      name: string;
+      symbol: string;
+    };
+  };
+  mintAddress?: string; // For backward compatibility
+  txid?: string; // For backward compatibility
   error?: string;
 }
 
@@ -213,8 +224,25 @@ const MintNFTPage: React.FC = () => {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            ...metadata,
-            ownerPublicKey: publicKey.toString(),
+            recipientPublicKey: publicKey.toString(),
+            metadata: {
+              name: formData.name.trim(),
+              symbol: formData.symbol.trim().toUpperCase(),
+              description: formData.description.trim(),
+              image: imageUrl,
+              uri: imageUrl,
+              attributes: formData.attributes,
+              properties: {
+                files: [
+                  {
+                    uri: imageUrl,
+                    type: imageFile.type,
+                  },
+                ],
+                category: "image",
+                creator: publicKey.toString(),
+              },
+            },
           }),
         }
       );
@@ -235,20 +263,51 @@ const MintNFTPage: React.FC = () => {
       const mintData: MintResponse = await mintResponse.json();
       console.log("Mint response:", mintData);
 
-      if (!mintData.success || !mintData.mintAddress) {
-        throw new Error(mintData.message || "Failed to mint NFT");
+      // Extract mint address from the response data
+      let mintAddress;
+      if (mintData.data?.mintAddress) {
+        // If the response follows the new format
+        mintAddress = mintData.data.mintAddress;
+      } else if (mintData.message) {
+        // Try to extract from message if it's in the old format
+        const mintAddressMatch = mintData.message.match(
+          /Mint Address: ([^\s,]+)/
+        );
+        if (mintAddressMatch) {
+          mintAddress = mintAddressMatch[1];
+        }
+      }
+
+      if (!mintAddress) {
+        throw new Error("Could not extract mint address from response");
       }
 
       // Store the mint response data
       setMintedNFT({
-        mintAddress: mintData.mintAddress,
-        txid: mintData.txid || "",
+        mintAddress: mintAddress,
+        txid: mintData.data?.txid || mintData.txid || "",
       });
 
       setMintSuccess(true);
       toast.success("NFT minted successfully!", { id: toastId });
     } catch (error) {
       console.error("NFT minting error:", error);
+      // Don't treat "NFT minted successfully" as an error
+      if (
+        error instanceof Error &&
+        error.message.includes("NFT minted successfully")
+      ) {
+        const mintAddressMatch = error.message.match(/Mint Address: ([^\s,]+)/);
+        if (mintAddressMatch) {
+          setMintedNFT({
+            mintAddress: mintAddressMatch[1],
+            txid: "",
+          });
+          setMintSuccess(true);
+          toast.success("NFT minted successfully!", { id: toastId });
+          return;
+        }
+      }
       toast.error(
         error instanceof Error ? error.message : "Failed to mint NFT",
         { id: toastId }
