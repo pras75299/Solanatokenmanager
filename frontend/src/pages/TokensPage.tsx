@@ -137,7 +137,7 @@ const TokensPage: React.FC = () => {
         "confirmed"
       );
 
-      console.log("Fetching token accounts for wallet:", publicKey.toString());
+      // console.log("Fetching token accounts for wallet:", publicKey.toString());
 
       // Get all token accounts for the wallet
       const tokenAccounts = await connection.getParsedTokenAccountsByOwner(
@@ -145,7 +145,7 @@ const TokensPage: React.FC = () => {
         { programId: TOKEN_PROGRAM_ID }
       );
 
-      console.log("Found token accounts:", tokenAccounts.value.length);
+      // console.log("Found token accounts:", tokenAccounts.value.length);
 
       // Fetch details for each token
       const tokenPromises = tokenAccounts.value.map(async (tokenAccount) => {
@@ -175,11 +175,11 @@ const TokensPage: React.FC = () => {
           const rawBalance = Number(freshTokenAccount.amount);
           const actualBalance = rawBalance / Math.pow(10, mintInfo.decimals);
 
-          console.log(`Token ${mintAddress} balance:`, {
-            raw: rawBalance,
-            actual: actualBalance,
-            decimals: mintInfo.decimals,
-          });
+          // console.log(`Token ${mintAddress} balance:`, {
+          //   raw: rawBalance,
+          //   actual: actualBalance,
+          //   decimals: mintInfo.decimals,
+          // });
 
           return {
             mintAddress,
@@ -189,10 +189,10 @@ const TokensPage: React.FC = () => {
             decimals: mintInfo.decimals,
           };
         } catch (error) {
-          console.error(
-            `Error fetching details for token ${mintAddress}:`,
-            error
-          );
+          // console.error(
+          //   `Error fetching details for token ${mintAddress}:`,
+          //   error
+          // );
           return null;
         }
       });
@@ -209,10 +209,10 @@ const TokensPage: React.FC = () => {
         return b.balance - a.balance; // Secondary sort by balance amount
       });
 
-      console.log("Final processed tokens:", sortedTokens);
+      //console.log("Final processed tokens:", sortedTokens);
       setTokens(sortedTokens);
     } catch (error) {
-      console.error("Error fetching tokens:", error);
+      //console.error("Error fetching tokens:", error);
       toast.error("Failed to fetch tokens");
     } finally {
       setLoading(false);
@@ -292,7 +292,7 @@ const TokensPage: React.FC = () => {
       toast.success("Token deleted successfully!", { id: toastId });
       await handleRefresh(); // Refresh the token list
     } catch (error) {
-      console.error("Delete error:", error);
+      //console.error("Delete error:", error);
       toast.error(error.message || "Failed to delete token", { id: toastId });
     } finally {
       setTokenToDelete(null); // Close the modal
@@ -303,7 +303,7 @@ const TokensPage: React.FC = () => {
   useEffect(() => {
     const fromBurn = location.state?.fromBurn;
     if (fromBurn && connected && publicKey) {
-      console.log("Detected navigation from burn page, refreshing tokens");
+      //console.log("Detected navigation from burn page, refreshing tokens");
       // Add a small delay to ensure blockchain state is updated
       setTimeout(() => {
         handleRefresh();
