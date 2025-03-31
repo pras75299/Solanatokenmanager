@@ -2,6 +2,7 @@ const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
 const dotenv = require("dotenv");
+const path = require("path");
 const tokenRoutes = require("./routes/tokenRoutes");
 const nftRoutes = require("./routes/nftRoutes");
 const airdropRoutes = require("./routes/airdropRoutes");
@@ -11,6 +12,9 @@ dotenv.config();
 const app = express();
 app.use(express.json());
 app.use(cors());
+
+// Serve static files from the uploads directory
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 // Root endpoint
 app.get("/", (req, res) => res.send("Backend server is running"));

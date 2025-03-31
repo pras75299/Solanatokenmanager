@@ -7,4 +7,7 @@ router.get("/minted-nfts", nftController.getMintedNFTs);
 router.post("/transfer-nft", nftController.transferNFT);
 router.get("/nfts", nftController.fetchNFTs);
 
+// Upload image route
+router.post("/upload-image", nftController.uploadImage);
+
 module.exports = router;
