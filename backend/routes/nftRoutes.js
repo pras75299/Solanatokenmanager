@@ -10,5 +10,7 @@ router.get("/refresh-metadata/:mintAddress", nftController.refreshMetadata);
 
 // Upload image route
 router.post("/upload-image", nftController.uploadImage);
+router.post("/migrate-local-images", nftController.migrateLocalImages);
+router.delete("/nft/:mintAddress", nftController.deleteNFT);
 
 module.exports = router;

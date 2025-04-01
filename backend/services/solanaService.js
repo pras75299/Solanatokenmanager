@@ -489,21 +489,47 @@ const getNFTMetadata = async (mintAddress) => {
       throw new Error("NFT not found on Solana");
     }
 
-    // Get the JSON metadata from the URI
-    const response = await fetch(nft.uri);
-    if (!response.ok) {
-      throw new Error("Failed to fetch NFT metadata from URI");
+    // If the URI is a placeholder image, return basic metadata
+    if (nft.uri.includes("placehold.co")) {
+      return {
+        name: nft.name || "Unnamed NFT",
+        symbol: nft.symbol || "NFT",
+        uri: nft.uri,
+        description: "Placeholder image for NFT",
+        attributes: [],
+      };
     }
 
-    const metadata = await response.json();
+    // For non-placeholder URIs, try to fetch metadata
+    try {
+      const response = await fetch(nft.uri);
+      if (!response.ok) {
+        throw new Error("Failed to fetch NFT metadata from URI");
+      }
 
-    return {
-      name: metadata.name || nft.name,
-      symbol: metadata.symbol || nft.symbol,
-      uri: metadata.image || nft.uri,
-      description: metadata.description,
-      attributes: metadata.attributes,
-    };
+      const metadata = await response.json();
+
+      return {
+        name: metadata.name || nft.name,
+        symbol: metadata.symbol || nft.symbol,
+        uri: metadata.image || nft.uri,
+        description: metadata.description,
+        attributes: metadata.attributes,
+      };
+    } catch (error) {
+      // If metadata fetch fails, return basic NFT data
+      console.warn(
+        "Failed to fetch metadata from URI, using basic NFT data:",
+        error
+      );
+      return {
+        name: nft.name || "Unnamed NFT",
+        symbol: nft.symbol || "NFT",
+        uri: nft.uri,
+        description: "Metadata unavailable",
+        attributes: [],
+      };
+    }
   } catch (error) {
     console.error("Error fetching NFT metadata:", error);
     throw new Error(`Failed to fetch NFT metadata: ${error.message}`);

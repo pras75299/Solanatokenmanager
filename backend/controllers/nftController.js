@@ -3,11 +3,19 @@ const NFT = require("../models/NFT");
 const loadKeypair = require("../importKey");
 const multer = require("multer");
 const path = require("path");
+const cloudinary = require("cloudinary").v2;
 const fs = require("fs").promises;
 
-// Configure multer for image upload
+// Configure Cloudinary
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+
+// Configure multer for temporary file storage
 const storage = multer.diskStorage({
-  destination: "./uploads/",
+  destination: "./tmp/uploads/",
   filename: (req, file, cb) => {
     const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
     cb(
@@ -34,7 +42,7 @@ const upload = multer({
     }
     cb(new Error("Only image files are allowed!"));
   },
-}).single("file"); // 'file' is the field name
+}).single("file");
 
 exports.mintNFT = async (req, res) => {
   const { recipientPublicKey, metadata } = req.body;
@@ -55,6 +63,65 @@ exports.mintNFT = async (req, res) => {
   }
 
   try {
+    // Ensure image URL is from Cloudinary
+    let imageUri = metadata.uri;
+    if (!imageUri.includes("cloudinary.com")) {
+      // If the image is not from Cloudinary, try to fetch and upload it
+      try {
+        // For base64 images
+        if (imageUri.startsWith("data:image")) {
+          const base64Data = imageUri.split(",")[1];
+          const buffer = Buffer.from(base64Data, "base64");
+          const tempPath = `./tmp/uploads/${Date.now()}-image.png`;
+
+          // Save base64 to temporary file
+          await fs.mkdir("./tmp/uploads", { recursive: true });
+          await fs.writeFile(tempPath, buffer);
+
+          // Upload to Cloudinary
+          const result = await cloudinary.uploader.upload(tempPath, {
+            folder: "solana-nfts",
+            resource_type: "image",
+            public_id: `${recipientPublicKey}-${Date.now()}`,
+            transformation: [
+              { quality: "auto:best" },
+              { fetch_format: "auto" },
+            ],
+          });
+
+          // Clean up temp file
+          await fs.unlink(tempPath);
+
+          imageUri = result.secure_url;
+        }
+        // For URLs (including localhost)
+        else {
+          const result = await cloudinary.uploader.upload(imageUri, {
+            folder: "solana-nfts",
+            resource_type: "image",
+            public_id: `${recipientPublicKey}-${Date.now()}`,
+            transformation: [
+              { quality: "auto:best" },
+              { fetch_format: "auto" },
+            ],
+          });
+          imageUri = result.secure_url;
+        }
+
+        // Update metadata with Cloudinary URL
+        metadata.uri = imageUri;
+        metadata.image = imageUri;
+      } catch (uploadError) {
+        console.error("Image Upload Error:", uploadError);
+        return res.status(400).json({
+          success: false,
+          message:
+            "Failed to process image. Please upload image to Cloudinary first.",
+          error: uploadError.message,
+        });
+      }
+    }
+
     const result = await solanaService.mintNFT(recipientPublicKey, metadata);
 
     // Safer regex pattern with error handling
@@ -67,7 +134,7 @@ exports.mintNFT = async (req, res) => {
     const newNFT = new NFT({
       recipientPublicKey,
       mintAddress,
-      uri: metadata.uri,
+      uri: imageUri,
       name: metadata.name,
       symbol: metadata.symbol,
     });
@@ -137,20 +204,18 @@ exports.transferNFT = async (req, res) => {
 
 exports.uploadImage = async (req, res) => {
   try {
-    // Create uploads directory if it doesn't exist
-    await fs.mkdir("./uploads", { recursive: true });
+    // Create temporary uploads directory if it doesn't exist
+    await fs.mkdir("./tmp/uploads", { recursive: true });
 
     // Handle the upload using multer
     upload(req, res, async (err) => {
       if (err instanceof multer.MulterError) {
-        // A Multer error occurred during upload
         return res.status(400).json({
           success: false,
           message: "File upload error",
           error: err.message,
         });
       } else if (err) {
-        // An unknown error occurred
         return res.status(500).json({
           success: false,
           message: "Error uploading file",
@@ -169,7 +234,7 @@ exports.uploadImage = async (req, res) => {
       // Validate wallet address
       const wallet = req.body.wallet;
       if (!wallet) {
-        // Delete the uploaded file if wallet validation fails
+        // Delete the temporary file
         await fs.unlink(req.file.path);
         return res.status(400).json({
           success: false,
@@ -177,20 +242,36 @@ exports.uploadImage = async (req, res) => {
         });
       }
 
-      // Generate the URL for the uploaded file
-      const baseUrl = process.env.BASE_URL || "http://localhost:3000";
-      const imageUrl = `${baseUrl}/uploads/${req.file.filename}`;
+      try {
+        // Upload to Cloudinary
+        const result = await cloudinary.uploader.upload(req.file.path, {
+          folder: "solana-nfts",
+          resource_type: "image",
+          public_id: `${wallet}-${Date.now()}`,
+          transformation: [{ quality: "auto:best" }, { fetch_format: "auto" }],
+        });
 
-      res.status(200).json({
-        success: true,
-        message: "File uploaded successfully",
-        imageUrl: imageUrl,
-        file: {
-          filename: req.file.filename,
-          mimetype: req.file.mimetype,
-          size: req.file.size,
-        },
-      });
+        // Delete the temporary file
+        await fs.unlink(req.file.path);
+
+        res.status(200).json({
+          success: true,
+          message: "File uploaded successfully",
+          imageUrl: result.secure_url,
+          file: {
+            filename: result.public_id,
+            mimetype: req.file.mimetype,
+            size: result.bytes,
+            format: result.format,
+            width: result.width,
+            height: result.height,
+          },
+        });
+      } catch (cloudinaryError) {
+        // Delete the temporary file if Cloudinary upload fails
+        await fs.unlink(req.file.path);
+        throw cloudinaryError;
+      }
     });
   } catch (error) {
     console.error("Image Upload Error:", error);
@@ -241,6 +322,108 @@ exports.refreshMetadata = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to refresh NFT metadata",
+      error: error.message,
+    });
+  }
+};
+
+exports.migrateLocalImages = async (req, res) => {
+  try {
+    console.log("Starting migration process...");
+
+    // Find all NFTs with localhost or 127.0.0.1 in their URIs
+    const nfts = await NFT.find({
+      uri: {
+        $regex: /(localhost|127\.0\.0\.1)/i,
+      },
+    });
+
+    console.log(`Found ${nfts.length} NFTs with localhost URLs`);
+    if (nfts.length === 0) {
+      return res.status(200).json({
+        success: true,
+        message: "No NFTs found with localhost URLs",
+        migratedCount: 0,
+      });
+    }
+
+    const migratedNFTs = [];
+
+    for (const nft of nfts) {
+      try {
+        console.log(`Processing NFT ${nft.mintAddress}`);
+        console.log(`Original URI: ${nft.uri}`);
+
+        // Create a placeholder image
+        const placeholderUrl = `https://placehold.co/400x400?text=NFT+${nft.mintAddress}`;
+
+        // Update NFT with placeholder URL
+        const oldUri = nft.uri;
+        nft.uri = placeholderUrl;
+        await nft.save();
+
+        migratedNFTs.push({
+          mintAddress: nft.mintAddress,
+          oldUri: oldUri,
+          newUri: placeholderUrl,
+        });
+
+        console.log(
+          `Successfully migrated NFT ${nft.mintAddress} from ${oldUri} to ${placeholderUrl}`
+        );
+      } catch (error) {
+        console.error(`Failed to migrate NFT ${nft.mintAddress}:`, error);
+        // Continue with next NFT if one fails
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "NFT images migrated to placeholders",
+      migratedCount: migratedNFTs.length,
+      migratedNFTs,
+    });
+  } catch (error) {
+    console.error("Migration Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to migrate NFT images",
+      error: error.message,
+    });
+  }
+};
+
+exports.deleteNFT = async (req, res) => {
+  const { mintAddress } = req.params;
+
+  if (!mintAddress) {
+    return res.status(400).json({
+      success: false,
+      message: "Mint address is required",
+    });
+  }
+
+  try {
+    // Find and delete the NFT from our database
+    const nft = await NFT.findOneAndDelete({ mintAddress });
+
+    if (!nft) {
+      return res.status(404).json({
+        success: false,
+        message: "NFT not found",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "NFT deleted successfully",
+      data: nft,
+    });
+  } catch (error) {
+    console.error("NFT Deletion Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to delete NFT",
       error: error.message,
     });
   }
