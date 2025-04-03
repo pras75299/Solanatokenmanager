@@ -243,20 +243,43 @@ exports.uploadImage = async (req, res) => {
       }
 
       try {
-        // Upload to Cloudinary
+        // Ensure Cloudinary is properly configured
+        if (
+          !process.env.CLOUDINARY_CLOUD_NAME ||
+          !process.env.CLOUDINARY_API_KEY ||
+          !process.env.CLOUDINARY_API_SECRET
+        ) {
+          throw new Error("Cloudinary configuration is missing");
+        }
+
+        // Upload to Cloudinary with specific options
         const result = await cloudinary.uploader.upload(req.file.path, {
           folder: "solana-nfts",
           resource_type: "image",
           public_id: `${wallet}-${Date.now()}`,
-          transformation: [{ quality: "auto:best" }, { fetch_format: "auto" }],
+          transformation: [
+            { quality: "auto:best" },
+            { fetch_format: "auto" },
+            { width: 1000, crop: "limit" },
+          ],
+          format: "webp",
         });
 
         // Delete the temporary file
         await fs.unlink(req.file.path);
 
+        // Validate Cloudinary response
+        if (
+          !result.secure_url ||
+          !result.secure_url.includes("cloudinary.com")
+        ) {
+          throw new Error("Invalid response from Cloudinary");
+        }
+
+        // Return success with Cloudinary URL
         res.status(200).json({
           success: true,
-          message: "File uploaded successfully",
+          message: "File uploaded successfully to Cloudinary",
           imageUrl: result.secure_url,
           file: {
             filename: result.public_id,
@@ -269,15 +292,22 @@ exports.uploadImage = async (req, res) => {
         });
       } catch (cloudinaryError) {
         // Delete the temporary file if Cloudinary upload fails
-        await fs.unlink(req.file.path);
-        throw cloudinaryError;
+        if (req.file && req.file.path) {
+          await fs.unlink(req.file.path).catch(console.error);
+        }
+        console.error("Cloudinary Upload Error:", cloudinaryError);
+        res.status(500).json({
+          success: false,
+          message: "Failed to upload to Cloudinary",
+          error: cloudinaryError.message,
+        });
       }
     });
   } catch (error) {
     console.error("Image Upload Error:", error);
     res.status(500).json({
       success: false,
-      message: "Failed to upload image",
+      message: "Failed to process image upload",
       error: error.message,
     });
   }

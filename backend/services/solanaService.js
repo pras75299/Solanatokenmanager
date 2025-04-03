@@ -489,49 +489,63 @@ const getNFTMetadata = async (mintAddress) => {
       throw new Error("NFT not found on Solana");
     }
 
-    // If the URI is a placeholder image, return basic metadata
-    if (nft.uri.includes("placehold.co")) {
-      return {
-        name: nft.name || "Unnamed NFT",
-        symbol: nft.symbol || "NFT",
-        uri: nft.uri,
-        description: "Placeholder image for NFT",
-        attributes: [],
-      };
+    // Basic metadata that we always return
+    const baseMetadata = {
+      name: nft.name || "Unnamed NFT",
+      symbol: nft.symbol || "NFT",
+      uri: nft.uri,
+      description: "Metadata unavailable",
+      attributes: [],
+    };
+
+    // If the URI is a placeholder image or doesn't exist, return basic metadata
+    if (!nft.uri || nft.uri.includes("placehold.co")) {
+      return baseMetadata;
     }
 
-    // For non-placeholder URIs, try to fetch metadata
+    // For non-placeholder URIs, try to fetch metadata with timeout
     try {
-      const response = await fetch(nft.uri);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+
+      const response = await fetch(nft.uri, {
+        signal: controller.signal,
+        headers: {
+          Accept: "application/json",
+        },
+      });
+
+      clearTimeout(timeoutId);
+
       if (!response.ok) {
-        throw new Error("Failed to fetch NFT metadata from URI");
+        console.warn(
+          `Failed to fetch metadata from URI (${response.status}): ${nft.uri}`
+        );
+        return baseMetadata;
       }
 
       const metadata = await response.json();
 
+      // Validate and merge metadata
       return {
-        name: metadata.name || nft.name,
-        symbol: metadata.symbol || nft.symbol,
+        name: metadata.name || baseMetadata.name,
+        symbol: metadata.symbol || baseMetadata.symbol,
         uri: metadata.image || nft.uri,
-        description: metadata.description,
-        attributes: metadata.attributes,
+        description: metadata.description || baseMetadata.description,
+        attributes: Array.isArray(metadata.attributes)
+          ? metadata.attributes
+          : [],
       };
     } catch (error) {
-      // If metadata fetch fails, return basic NFT data
+      // Log the specific fetch error but don't throw
       console.warn(
-        "Failed to fetch metadata from URI, using basic NFT data:",
-        error
+        `Failed to fetch metadata from URI ${nft.uri}:`,
+        error.message
       );
-      return {
-        name: nft.name || "Unnamed NFT",
-        symbol: nft.symbol || "NFT",
-        uri: nft.uri,
-        description: "Metadata unavailable",
-        attributes: [],
-      };
+      return baseMetadata;
     }
   } catch (error) {
-    console.error("Error fetching NFT metadata:", error);
+    console.error("Error in getNFTMetadata:", error);
     throw new Error(`Failed to fetch NFT metadata: ${error.message}`);
   }
 };
