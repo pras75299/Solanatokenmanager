@@ -41,18 +41,15 @@ const getCloudinaryOptions = (publicKey, customOptions = {}) => ({
   ...customOptions,
 });
 
-// Configure Cloudinary with validation
-try {
-  validateCloudinaryConfig();
-  cloudinary.config({
-    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-    api_key: process.env.CLOUDINARY_API_KEY,
-    api_secret: process.env.CLOUDINARY_API_SECRET,
-  });
-} catch (error) {
-  console.error("Cloudinary Configuration Error:", error);
-  // Don't throw here - let individual endpoints handle the error
-}
+// Configure Cloudinary - Removed the try/catch as server.js handles initial validation
+// Ensure validateCloudinaryConfig is defined before this if needed elsewhere,
+// but server.js handles the main startup check.
+// validateCloudinaryConfig(); // Optional: Keep if needed for other potential uses
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
 
 // Configure multer for temporary file storage
 const storage = multer.diskStorage({
@@ -104,8 +101,7 @@ exports.mintNFT = async (req, res) => {
   }
 
   try {
-    // Validate Cloudinary configuration first
-    validateCloudinaryConfig();
+    // Removed validateCloudinaryConfig(); - Server startup handles this
 
     // Ensure image URL is from Cloudinary
     let imageUri = metadata.uri;
@@ -199,6 +195,21 @@ exports.mintNFT = async (req, res) => {
       },
     });
   } catch (error) {
+    // Add specific check for Cloudinary config errors potentially missed at startup
+    if (
+      error.message.includes("Missing Cloudinary configuration") ||
+      error.message.includes(
+        "Cloudinary configuration is not properly initialized"
+      )
+    ) {
+      console.error("NFT Minting Error due to Cloudinary Config:", error);
+      return res.status(500).json({
+        success: false,
+        message:
+          "Cloudinary service is not configured correctly. Please check server logs.",
+        error: error.message,
+      });
+    }
     console.error("NFT Minting Error:", error);
     return res.status(500).json({
       success: false,
@@ -253,8 +264,17 @@ exports.transferNFT = async (req, res) => {
 
 exports.uploadImage = async (req, res) => {
   try {
-    // Validate Cloudinary configuration first
-    validateCloudinaryConfig();
+    // Log environment variables and config state at the start of the request
+    console.log("[uploadImage] Checking Cloudinary Env Vars:", {
+      CLOUD_NAME_ENV: process.env.CLOUDINARY_CLOUD_NAME ? "Set" : "Not Set",
+      API_KEY_ENV: process.env.CLOUDINARY_API_KEY ? "Set" : "Not Set",
+      API_SECRET_ENV: process.env.CLOUDINARY_API_SECRET ? "Set" : "Not Set",
+    });
+    console.log("[uploadImage] Checking Cloudinary Config Object:", {
+      cloud_name_config: cloudinary.config().cloud_name || "Not Set",
+      api_key_config: cloudinary.config().api_key ? "Set" : "Not Set",
+      api_secret_config: cloudinary.config().api_secret ? "Set" : "Not Set",
+    });
 
     // Create temporary uploads directory if it doesn't exist
     await fs.mkdir("./tmp/uploads", { recursive: true });
@@ -294,6 +314,20 @@ exports.uploadImage = async (req, res) => {
       }
 
       try {
+        // Removed the explicit config check here - rely on server startup validation
+        // if (
+        //   !cloudinary.config().cloud_name ||
+        //   !cloudinary.config().api_key ||
+        //   !cloudinary.config().api_secret
+        // ) {
+        //   throw new Error(
+        //     "Cloudinary configuration is not properly initialized"
+        //   );
+        // }
+
+        // Log right before upload attempt
+        console.log(`[uploadImage] Attempting upload for wallet: ${wallet}`);
+
         // Upload to Cloudinary with standardized options
         const result = await cloudinary.uploader.upload(
           req.file.path,
@@ -310,6 +344,12 @@ exports.uploadImage = async (req, res) => {
           );
         }
 
+        console.log("Successfully uploaded to Cloudinary:", {
+          public_id: result.public_id,
+          format: result.format,
+          size: result.bytes,
+        });
+
         // Return success with Cloudinary URL
         return res.status(200).json({
           success: true,
@@ -325,33 +365,52 @@ exports.uploadImage = async (req, res) => {
           },
         });
       } catch (cloudinaryError) {
+        // Log the specific error encountered during upload
+        console.error(
+          `[uploadImage] Cloudinary uploader.upload Error for wallet ${wallet}:`,
+          {
+            message: cloudinaryError.message,
+            code: cloudinaryError.http_code,
+            name: cloudinaryError.name, // e.g., 'Error', 'AuthorizationRequired'
+          }
+        );
+
         // Clean up temporary file if it exists
         if (req.file?.path) {
           await fs.unlink(req.file.path).catch(console.error);
         }
 
-        // Determine if it's a configuration error
+        // Return a more specific error if it seems config-related
         if (
-          cloudinaryError.message.includes("Missing Cloudinary configuration")
+          !cloudinary.config().cloud_name ||
+          !cloudinary.config().api_key ||
+          !cloudinary.config().api_secret
         ) {
+          console.error(
+            "[uploadImage] Detected config issue during error handling."
+          );
           return res.status(500).json({
             success: false,
-            message: "Cloudinary service is not properly configured",
-            error: cloudinaryError.message,
+            message: "Cloudinary configuration error detected during upload.",
+            error: "Configuration seems invalid or missing.",
           });
         }
 
-        // Handle other Cloudinary errors
-        console.error("Cloudinary Upload Error:", cloudinaryError);
+        // Generic Cloudinary upload failure
         return res.status(500).json({
           success: false,
           message: "Failed to upload to Cloudinary",
-          error: cloudinaryError.message,
+          error: cloudinaryError.message || "Unknown Cloudinary error",
+          details: {
+            code: cloudinaryError.http_code,
+            type: cloudinaryError.name,
+          },
         });
       }
     });
   } catch (error) {
-    console.error("Image Upload Error:", error);
+    // General error before or during multer processing
+    console.error("[uploadImage] General Error:", error);
     return res.status(500).json({
       success: false,
       message: "Failed to process image upload",
