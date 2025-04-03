@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { motion } from "framer-motion";
-import { Loader2, Send, Info, X, RefreshCw } from "lucide-react";
+import { Loader2, Send, Info, X, RefreshCw, Trash2 } from "lucide-react";
 import toast from "react-hot-toast";
 import GlowingCard from "../components/GlowingCard";
 import { useLocation } from "react-router-dom";
@@ -33,9 +33,7 @@ const NFTCollectionPage = () => {
 
     try {
       setLoading(true);
-      console.log("Fetching NFTs for wallet:", publicKey.toString());
 
-      // Get NFTs for the wallet using the correct endpoint
       const response = await fetch(
         `https://solanatokenmanager.onrender.com/api/nfts?publicKey=${publicKey.toString()}`
       );
@@ -43,20 +41,19 @@ const NFTCollectionPage = () => {
       if (!response.ok) {
         const errorText = await response.text();
         console.error("Failed to fetch NFTs. API response:", errorText);
-        throw new Error("Failed to fetch NFTs");
+        throw new Error(
+          `Failed to fetch NFTs: Server responded with status ${response.status}`
+        );
       }
 
       const data = await response.json();
-      console.log("NFT data from API:", data);
 
       if (!data || !Array.isArray(data) || data.length === 0) {
-        console.log("No NFTs found for this wallet");
         setNfts([]);
         setLoading(false);
         return;
       }
 
-      // The NFTs from the API already contain all the metadata we need
       const validNfts = data.map((nft) => ({
         mintAddress: nft.mintAddress,
         name: nft.name || "Unnamed NFT",
@@ -65,7 +62,6 @@ const NFTCollectionPage = () => {
         description: nft.description || "",
       }));
 
-      console.log("Valid NFTs:", validNfts.length);
       setNfts(validNfts);
     } catch (error) {
       toast.error("Failed to load NFTs");
@@ -79,11 +75,9 @@ const NFTCollectionPage = () => {
     fetchNFTs();
   }, [publicKey, connected]);
 
-  // Refresh NFTs when navigating from the mint page
   useEffect(() => {
     const fromMintPage = location.state?.fromMintPage;
     if (fromMintPage && connected && publicKey) {
-      console.log("Detected navigation from mint page, refreshing NFTs");
       fetchNFTs();
     }
   }, [location]);
@@ -120,7 +114,7 @@ const NFTCollectionPage = () => {
       toast.success(data.message || "NFT transferred successfully!");
       setSelectedNFT(null);
       setTransferAddress("");
-      fetchNFTs(); // Refresh NFT list
+      fetchNFTs();
     } catch (error) {
       toast.error("Failed to transfer NFT");
       console.error("Transfer error:", error);
@@ -129,7 +123,6 @@ const NFTCollectionPage = () => {
     }
   };
 
-  // Add a function to handle metadata refresh for a specific NFT
   const handleNFTRefresh = async (mintAddress: string) => {
     try {
       const response = await fetch(
@@ -140,12 +133,50 @@ const NFTCollectionPage = () => {
         throw new Error("Failed to refresh NFT metadata");
       }
 
-      // Refetch all NFTs to get the updated data
       await fetchNFTs();
       toast.success("NFT metadata refreshed");
     } catch (error) {
       toast.error("Failed to refresh NFT metadata");
       console.error("Refresh error:", error);
+    }
+  };
+
+  const handleDelete = async (mintAddress: string) => {
+    if (
+      !window.confirm(
+        "Are you sure you want to delete this NFT record? This cannot be undone."
+      )
+    ) {
+      return;
+    }
+
+    const toastId = toast.loading("Deleting NFT record...");
+    try {
+      const response = await fetch(
+        `https://solanatokenmanager.onrender.com/api/nft/${mintAddress}`,
+        {
+          method: "DELETE",
+        }
+      );
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error("Delete NFT error response:", errorText);
+        throw new Error(
+          `Failed to delete NFT: Server responded with status ${response.status}`
+        );
+      }
+
+      setNfts((prevNfts) =>
+        prevNfts.filter((nft) => nft.mintAddress !== mintAddress)
+      );
+      toast.success("NFT record deleted successfully", { id: toastId });
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Failed to delete NFT record",
+        { id: toastId }
+      );
+      console.error("Delete error:", error);
     }
   };
 
@@ -203,7 +234,7 @@ const NFTCollectionPage = () => {
           </div>
         </GlowingCard>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-6">
           {nfts.map((nft) => (
             <GlowingCard key={nft.mintAddress}>
               <div className="space-y-4">
@@ -212,18 +243,47 @@ const NFTCollectionPage = () => {
                     src={nft.uri}
                     alt={nft.name}
                     className="w-full h-full object-cover"
-                    onError={(e) => {
-                      (e.target as HTMLImageElement).src =
-                        "https://placehold.co/400x400?text=NFT";
+                    onError={async (e) => {
+                      const imgElement = e.target as HTMLImageElement;
+                      if (
+                        nft.uri.includes("localhost") ||
+                        nft.uri.includes("127.0.0.1")
+                      ) {
+                        try {
+                          await handleNFTRefresh(nft.mintAddress);
+                          const updatedNFT = nfts.find(
+                            (n) => n.mintAddress === nft.mintAddress
+                          );
+                          if (updatedNFT && updatedNFT.uri !== nft.uri) {
+                            imgElement.src = updatedNFT.uri;
+                            return;
+                          }
+                        } catch (error) {
+                          console.error(
+                            "Failed to refresh NFT metadata:",
+                            error
+                          );
+                        }
+                      }
+                      imgElement.src = "https://placehold.co/400x400?text=NFT";
                     }}
                   />
-                  <button
-                    onClick={() => handleNFTRefresh(nft.mintAddress)}
-                    className="absolute top-2 right-2 bg-gray-800/80 p-2 rounded-full hover:bg-gray-700/80 transition-colors"
-                    title="Refresh metadata"
-                  >
-                    <RefreshCw className="w-4 h-4 text-white" />
-                  </button>
+                  <div className="absolute top-2 right-2 flex gap-2">
+                    <button
+                      onClick={() => handleNFTRefresh(nft.mintAddress)}
+                      className="bg-gray-800/80 p-2 rounded-full hover:bg-gray-700/80 transition-colors"
+                      title="Refresh metadata"
+                    >
+                      <RefreshCw className="w-4 h-4 text-white" />
+                    </button>
+                    <button
+                      onClick={() => handleDelete(nft.mintAddress)}
+                      className="bg-red-800/80 p-2 rounded-full hover:bg-red-700/80 transition-colors"
+                      title="Delete NFT"
+                    >
+                      <Trash2 className="w-4 h-4 text-white" />
+                    </button>
+                  </div>
                 </div>
                 <div>
                   <h3 className="text-xl font-semibold text-white mb-1">
@@ -249,7 +309,6 @@ const NFTCollectionPage = () => {
         </div>
       )}
 
-      {/* Transfer Modal */}
       {selectedNFT && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <GlowingCard className="w-full max-w-md">

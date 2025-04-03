@@ -16,6 +16,7 @@ interface FormData {
   name: string;
   description: string;
   image: File | null;
+  cloudinaryUrl: string | null;
   symbol: string;
   attributes: Array<{
     trait_type: string;
@@ -45,11 +46,13 @@ interface MintResponse {
 const MintNFTPage: React.FC = () => {
   const { publicKey, connected } = useWallet();
   const [loading, setLoading] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
   const [formData, setFormData] = useState<FormData>({
     name: "",
     symbol: "",
     description: "",
     image: null,
+    cloudinaryUrl: null,
     attributes: [],
   });
   const [imagePreview, setImagePreview] = useState<string | null>(null);
@@ -80,7 +83,54 @@ const MintNFTPage: React.FC = () => {
     return true;
   };
 
-  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const uploadImageToCloudinary = async (file: File): Promise<string> => {
+    try {
+      const imageFormData = new FormData();
+      const fileExtension = file.name.split(".").pop() || "png";
+      const cleanFileName = `nft-image-${Date.now()}.${fileExtension}`;
+      const cleanFile = new File([file], cleanFileName, { type: file.type });
+
+      imageFormData.append("file", cleanFile);
+      imageFormData.append("wallet", publicKey?.toString() || "unknown");
+
+      const uploadResponse = await fetch(
+        "https://solanatokenmanager.onrender.com/api/upload-image",
+        {
+          method: "POST",
+          body: imageFormData,
+        }
+      );
+
+      if (!uploadResponse.ok) {
+        const errorText = await uploadResponse.text();
+        console.error("Server upload error response:", errorText);
+        throw new Error(
+          `Failed to upload image: Server responded with status ${uploadResponse.status}`
+        );
+      }
+
+      const uploadData = await uploadResponse.json();
+
+      if (!uploadData.success || !uploadData.imageUrl) {
+        console.error("Invalid upload success response:", uploadData);
+        throw new Error("Failed to get valid image URL from upload response");
+      }
+      if (!uploadData.imageUrl.includes("cloudinary.com")) {
+        console.error(
+          "Server returned a non-Cloudinary URL:",
+          uploadData.imageUrl
+        );
+        throw new Error("Server returned an invalid image URL format");
+      }
+
+      return uploadData.imageUrl;
+    } catch (error) {
+      console.error("Error during uploadImageToCloudinary:", error);
+      throw error;
+    }
+  };
+
+  const handleImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       if (file.size > 5 * 1024 * 1024) {
@@ -88,19 +138,87 @@ const MintNFTPage: React.FC = () => {
         return;
       }
 
-      // Validate file type
       if (!file.type.startsWith("image/")) {
         toast.error("Please upload a valid image file");
         return;
       }
 
-      setFormData({ ...formData, image: file });
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setImagePreview(reader.result as string);
-      };
-      reader.readAsDataURL(file);
+      try {
+        setUploadingImage(true);
+        const localPreview = URL.createObjectURL(file);
+        setImagePreview(localPreview);
+
+        const toastId = toast.loading("Uploading image...");
+        const cloudinaryUrl = await uploadImageToCloudinary(file);
+
+        setFormData({
+          ...formData,
+          image: file,
+          cloudinaryUrl: cloudinaryUrl,
+        });
+
+        URL.revokeObjectURL(localPreview);
+        setImagePreview(cloudinaryUrl);
+
+        toast.success("Image uploaded successfully", { id: toastId });
+      } catch (error) {
+        toast.error(
+          error instanceof Error ? error.message : "Failed to upload image"
+        );
+        setFormData({
+          ...formData,
+          image: null,
+          cloudinaryUrl: null,
+        });
+        setImagePreview(null);
+      } finally {
+        setUploadingImage(false);
+      }
     }
+  };
+
+  // Image preview component
+  const ImagePreview = () => {
+    if (!imagePreview) return null;
+
+    return (
+      <div className="relative w-full aspect-square rounded-lg overflow-hidden mb-4">
+        <img
+          src={imagePreview}
+          alt="Preview"
+          className="w-full h-full object-cover"
+          onError={() => {
+            // Fallback to Cloudinary URL if preview fails
+            if (formData.cloudinaryUrl) {
+              setImagePreview(formData.cloudinaryUrl);
+            }
+          }}
+        />
+        <button
+          type="button"
+          onClick={() => {
+            if (imagePreview.startsWith("blob:")) {
+              URL.revokeObjectURL(imagePreview);
+            }
+            setFormData({
+              ...formData,
+              image: null,
+              cloudinaryUrl: null,
+            });
+            setImagePreview(null);
+          }}
+          className="absolute top-2 right-2 bg-red-500 text-white p-2 rounded-full hover:bg-red-600 transition-colors"
+          aria-label="Remove image"
+        >
+          ×
+        </button>
+        {uploadingImage && (
+          <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center">
+            <Loader2 className="w-8 h-8 text-white animate-spin" />
+          </div>
+        )}
+      </div>
+    );
   };
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -114,6 +232,11 @@ const MintNFTPage: React.FC = () => {
       return;
     }
 
+    if (!formData.cloudinaryUrl) {
+      toast.error("Image not yet uploaded or upload failed.");
+      return;
+    }
+
     const toastId = toast.loading("Preparing to mint NFT...");
 
     try {
@@ -121,90 +244,18 @@ const MintNFTPage: React.FC = () => {
       setMintSuccess(false);
       setMintedNFT(null);
 
-      console.log(
-        "Starting NFT mint process for wallet:",
-        publicKey.toString()
-      );
-
-      // First, upload the image
-      const imageFormData = new FormData();
-      const imageFile = formData.image!;
-
-      // Ensure the file name is clean and has the correct extension
-      const fileExtension = imageFile.name.split(".").pop() || "png";
-      const cleanFileName = `nft-image-${Date.now()}.${fileExtension}`;
-
-      // Create a new File object with the clean name
-      const cleanFile = new File([imageFile], cleanFileName, {
-        type: imageFile.type,
-      });
-
-      imageFormData.append("file", cleanFile); // Changed from "image" to "file"
-      imageFormData.append("wallet", publicKey.toString());
-
-      console.log("Uploading image...", {
-        fileName: cleanFileName,
-        fileType: imageFile.type,
-        fileSize: imageFile.size,
-      });
-
-      const uploadResponse = await fetch(
-        "https://solanatokenmanager.onrender.com/api/upload-image",
-        {
-          method: "POST",
-          body: imageFormData,
-        }
-      );
-
-      let responseText;
-      try {
-        responseText = await uploadResponse.text();
-        console.log("Upload response text:", responseText);
-      } catch (e) {
-        console.error("Failed to read response text:", e);
-        throw new Error("Failed to read upload response");
-      }
-
-      if (!uploadResponse.ok) {
-        let errorMessage = "Failed to upload image";
-        try {
-          const errorData = JSON.parse(responseText);
-          errorMessage = errorData.message || errorData.error || errorMessage;
-        } catch (e) {
-          // If JSON parsing fails, use the response text directly
-          errorMessage =
-            responseText || uploadResponse.statusText || errorMessage;
-        }
-        throw new Error(errorMessage);
-      }
-
-      let imageUrl;
-      try {
-        const uploadData = JSON.parse(responseText);
-        imageUrl = uploadData.imageUrl || uploadData.url;
-        if (!imageUrl) {
-          throw new Error("No image URL in response");
-        }
-        console.log("Image uploaded successfully:", imageUrl);
-      } catch (e) {
-        console.error("Failed to parse upload response:", e);
-        throw new Error("Invalid upload response format");
-      }
-
-      toast.loading("Creating NFT metadata...", { id: toastId });
-
-      // Prepare metadata
       const metadata = {
         name: formData.name.trim(),
         symbol: formData.symbol.trim().toUpperCase(),
         description: formData.description.trim(),
-        image: imageUrl,
+        uri: formData.cloudinaryUrl,
+        image: formData.cloudinaryUrl,
         attributes: formData.attributes,
         properties: {
           files: [
             {
-              uri: imageUrl,
-              type: imageFile.type,
+              uri: formData.cloudinaryUrl,
+              type: formData.image?.type || "image/jpeg",
             },
           ],
           category: "image",
@@ -212,10 +263,8 @@ const MintNFTPage: React.FC = () => {
         },
       };
 
-      console.log("Minting NFT with metadata:", metadata);
       toast.loading("Minting NFT...", { id: toastId });
 
-      // Mint the NFT
       const mintResponse = await fetch(
         "https://solanatokenmanager.onrender.com/api/mint-nft",
         {
@@ -225,24 +274,7 @@ const MintNFTPage: React.FC = () => {
           },
           body: JSON.stringify({
             recipientPublicKey: publicKey.toString(),
-            metadata: {
-              name: formData.name.trim(),
-              symbol: formData.symbol.trim().toUpperCase(),
-              description: formData.description.trim(),
-              image: imageUrl,
-              uri: imageUrl,
-              attributes: formData.attributes,
-              properties: {
-                files: [
-                  {
-                    uri: imageUrl,
-                    type: imageFile.type,
-                  },
-                ],
-                category: "image",
-                creator: publicKey.toString(),
-              },
-            },
+            metadata: metadata,
           }),
         }
       );
@@ -261,7 +293,6 @@ const MintNFTPage: React.FC = () => {
       }
 
       const mintData: MintResponse = await mintResponse.json();
-      console.log("Mint response:", mintData);
 
       // Extract mint address from the response data
       let mintAddress;
@@ -279,7 +310,11 @@ const MintNFTPage: React.FC = () => {
       }
 
       if (!mintAddress) {
-        throw new Error("Could not extract mint address from response");
+        console.error(
+          "Could not extract mint address from response:",
+          mintData
+        );
+        throw new Error("Could not extract mint address from minting response");
       }
 
       // Store the mint response data
@@ -291,28 +326,23 @@ const MintNFTPage: React.FC = () => {
       setMintSuccess(true);
       toast.success("NFT minted successfully!", { id: toastId });
     } catch (error) {
-      console.error("NFT minting error:", error);
-      // Don't treat "NFT minted successfully" as an error
-      if (
-        error instanceof Error &&
-        error.message.includes("NFT minted successfully")
-      ) {
-        const mintAddressMatch = error.message.match(/Mint Address: ([^\s,]+)/);
-        if (mintAddressMatch) {
-          setMintedNFT({
-            mintAddress: mintAddressMatch[1],
-            txid: "",
-          });
-          setMintSuccess(true);
-          toast.success("NFT minted successfully!", { id: toastId });
-          return;
+      console.error("NFT minting process error:", error);
+
+      // Default error message
+      let displayErrorMessage =
+        "Failed to mint NFT due to an unexpected error.";
+
+      // Use the specific error message from the backend if available
+      if (error instanceof Error && error.message) {
+        // Avoid displaying the confusing "NFT minted successfully" message as an error
+        if (!error.message.includes("NFT minted successfully")) {
+          displayErrorMessage = error.message;
         }
       }
-      toast.error(
-        error instanceof Error ? error.message : "Failed to mint NFT",
-        { id: toastId }
-      );
-      setMintSuccess(false);
+
+      // Display the determined error message
+      toast.error(displayErrorMessage, { id: toastId });
+      setMintSuccess(false); // Ensure success state is false on error
     } finally {
       setLoading(false);
     }
@@ -324,6 +354,7 @@ const MintNFTPage: React.FC = () => {
       symbol: "",
       description: "",
       image: null,
+      cloudinaryUrl: null,
       attributes: [],
     });
     setImagePreview(null);
@@ -462,23 +493,7 @@ const MintNFTPage: React.FC = () => {
                 <label className="block text-gray-300 mb-2">Image *</label>
                 <div className="relative">
                   {imagePreview ? (
-                    <div className="relative w-full aspect-square rounded-lg overflow-hidden mb-4">
-                      <img
-                        src={imagePreview}
-                        alt="Preview"
-                        className="w-full h-full object-cover"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setFormData({ ...formData, image: null });
-                          setImagePreview(null);
-                        }}
-                        className="absolute top-2 right-2 bg-red-500 text-white p-2 rounded-full hover:bg-red-600 transition-colors"
-                      >
-                        ×
-                      </button>
-                    </div>
+                    <ImagePreview />
                   ) : (
                     <div className="border-2 border-dashed border-gray-700 rounded-lg p-8 text-center hover:border-purple-500 transition-colors">
                       <input
