@@ -269,95 +269,19 @@ exports.fetchNFTs = async (req, res) => {
 exports.transferNFT = async (req, res) => {
   const { mintAddress, recipientPublicKey } = req.body;
 
-  // --- Input Validation ---
-  if (!mintAddress || !recipientPublicKey) {
-    return sendErrorResponse(
-      res,
-      400,
-      "Missing required fields: mintAddress or recipientPublicKey"
-    );
-  }
-  // Basic validation for recipient public key format (example)
-  if (
-    typeof recipientPublicKey !== "string" ||
-    recipientPublicKey.length < 32 ||
-    recipientPublicKey.length > 44
-  ) {
-    return sendErrorResponse(res, 400, "Invalid recipient public key format.");
-  }
-
   try {
-    // --- Perform On-Chain Transfer ---
-    const senderKeypair = loadKeypair(); // Assuming this loads the app's main wallet keypair
-    console.log(
-      `[transferNFT] Attempting transfer of ${mintAddress} to ${recipientPublicKey}`
-    );
-
-    const transferServiceResponse = await solanaService.transferNFT(
+    const senderKeypair = loadKeypair();
+    const transferResponse = await solanaService.transferNFT(
       mintAddress,
       senderKeypair,
       recipientPublicKey
     );
 
-    console.log(
-      `[transferNFT] On-chain transfer successful for ${mintAddress}. Response: ${transferServiceResponse}`
-    );
-
-    // --- Update Database Record ---
-    const updatedNft = await NFT.findOneAndUpdate(
-      { mintAddress: mintAddress },
-      { $set: { recipientPublicKey: recipientPublicKey } },
-      { new: true } // Return the updated document
-    );
-
-    if (!updatedNft) {
-      // This case is unlikely if the transfer succeeded, but handle defensively
-      console.warn(
-        `[transferNFT] NFT with mint address ${mintAddress} not found in DB after successful on-chain transfer.`
-      );
-      // Decide if this should be an error or just a warning.
-      // Returning success as the main action (on-chain transfer) succeeded.
-    } else {
-      console.log(
-        `[transferNFT] Database record updated for ${mintAddress}. New owner: ${recipientPublicKey}`
-      );
-    }
-
-    // --- Send Success Response ---
-    return res.status(200).json({
-      success: true,
-      message:
-        transferServiceResponse ||
-        "NFT transferred successfully and database updated.", // Use service message or default
-      data: {
-        updatedNft: updatedNft, // Optionally return updated DB record
-      },
-    });
+    res.status(200).json({ message: transferResponse });
   } catch (error) {
-    // --- Error Handling ---
-    if (error.message.includes("Failed to find token account")) {
-      return sendErrorResponse(
-        res,
-        404,
-        "NFT or associated token account not found on-chain.",
-        error
-      );
-    }
-    if (error.message.includes("owner does not match")) {
-      return sendErrorResponse(
-        res,
-        403,
-        "Transfer failed: Sender does not own the NFT.",
-        error
-      );
-    }
-    // Handle other potential errors from solanaService or DB update
-    return sendErrorResponse(
-      res,
-      500,
-      "NFT transfer failed due to an unexpected error.",
-      error
-    );
+    res
+      .status(500)
+      .json({ message: "NFT transfer failed", error: error.message });
   }
 };
 
