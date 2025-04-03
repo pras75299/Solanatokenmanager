@@ -8,10 +8,11 @@ const tokenRoutes = require("./routes/tokenRoutes");
 const nftRoutes = require("./routes/nftRoutes");
 const airdropRoutes = require("./routes/airdropRoutes");
 
-// Load environment variables first, before any other operations
-dotenv.config({ path: path.join(__dirname, ".env") });
+// Load environment variables
+// Added error handling for dotenv loading
+dotenv.config();
 
-// Validate and configure Cloudinary immediately
+// Validate and configure Cloudinary
 const configureCloudinary = async () => {
   const requiredEnvVars = [
     "CLOUDINARY_CLOUD_NAME",
@@ -24,7 +25,10 @@ const configureCloudinary = async () => {
     (envVar) => !process.env[envVar]
   );
   if (missingEnvVars.length > 0) {
-    console.error("Missing required environment variables:", missingEnvVars);
+    console.error(
+      "❌ Fatal Error: Missing required environment variables:",
+      missingEnvVars
+    );
     process.exit(1);
   }
 
@@ -36,48 +40,56 @@ const configureCloudinary = async () => {
   });
 
   try {
-    // Verify Cloudinary configuration with await
-    const result = await cloudinary.api.ping();
-    console.log("✅ Cloudinary configuration verified:", result);
-    return true;
+    // Verify Cloudinary configuration
+    await cloudinary.api.ping();
+    console.log("✅ Cloudinary configuration verified.");
   } catch (error) {
-    console.error("❌ Cloudinary configuration error:", error);
+    console.error(
+      "❌ Fatal Error: Cloudinary configuration is invalid:",
+      error.message
+    );
     process.exit(1);
   }
 };
 
 const startServer = async () => {
   try {
-    // Ensure Cloudinary is configured before starting the server
     await configureCloudinary();
 
     const app = express();
-    app.use(express.json());
     app.use(cors());
+    app.use(express.json());
 
-    // Serve static files from the uploads directory
-    app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+    app.get("/", (req, res) =>
+      res.status(200).send("Backend server is healthy")
+    );
 
-    // Root endpoint
-    app.get("/", (req, res) => res.send("Backend server is running"));
-
-    // Use routes
+    // API Routes
     app.use("/api", tokenRoutes);
     app.use("/api", nftRoutes);
     app.use("/api", airdropRoutes);
 
-    // MongoDB connection and server start
+    app.use((err, req, res, next) => {
+      console.error("Unhandled Error:", err);
+      res.status(500).json({
+        success: false,
+        message: "An unexpected server error occurred.",
+      });
+    });
+
+    // MongoDB Connection
     const PORT = process.env.PORT || 5000;
     const MONGO_URI = process.env.MONGO_URI;
 
     await mongoose.connect(MONGO_URI);
-    console.log("✅ Connected to MongoDB");
+    console.log("✅ Connected to MongoDB.");
 
+    // Start Server
     app.listen(PORT, () => {
       console.log(`✅ Server running on port ${PORT}`);
     });
   } catch (error) {
-    console.error("❌ Server startup error:", error);
+    console.error("❌ Server startup failed:", error);
     process.exit(1);
   }
 };
