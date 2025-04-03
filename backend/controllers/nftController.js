@@ -233,6 +233,7 @@ exports.mintNFT = async (req, res) => {
       );
     }
     // Generic error
+    console.error("[mintNFT] Unexpected error during minting process:", error);
     return sendErrorResponse(
       res,
       500,
