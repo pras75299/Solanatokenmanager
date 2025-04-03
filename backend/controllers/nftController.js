@@ -86,13 +86,19 @@ const upload = multer({
 
 // Helper function for consistent error responses
 const sendErrorResponse = (res, statusCode, message, error = null) => {
+  // Log the full error object for better debugging, especially for 500 errors
   console.error(
     `Error ${statusCode}: ${message}`,
-    error ? error.message || error : ""
+    error
+      ? error.stack
+        ? `\\nStack: ${error.stack}`
+        : `\\nDetails: ${JSON.stringify(error)}`
+      : "" // Log stack or details
   );
   return res.status(statusCode).json({
     success: false,
     message: message,
+    // Provide the error message, or the string representation if it's not an Error object
     error: error ? error.message || String(error) : undefined,
   });
 };
@@ -116,9 +122,9 @@ exports.mintNFT = async (req, res) => {
     );
   }
 
-  try {
-    let finalImageUri = metadata.uri;
+  let finalImageUri = metadata.uri; // Define here to be accessible in the final catch
 
+  try {
     // --- Upload Image to Cloudinary if necessary ---
     if (!finalImageUri.includes("cloudinary.com")) {
       try {
@@ -127,9 +133,11 @@ exports.mintNFT = async (req, res) => {
           // Handle Base64
           const base64Data = finalImageUri.split(",")[1];
           const buffer = Buffer.from(base64Data, "base64");
-          const tempPath = `./tmp/uploads/${Date.now()}-image.png`; // Consider more robust temp naming
+          // Ensure tmp directory exists
           await fs.mkdir("./tmp/uploads", { recursive: true });
+          const tempPath = `./tmp/uploads/${Date.now()}-image.png`; // Define path after directory creation
           await fs.writeFile(tempPath, buffer);
+
           uploadResult = await cloudinary.uploader.upload(
             tempPath,
             getCloudinaryOptions(recipientPublicKey)
@@ -148,14 +156,25 @@ exports.mintNFT = async (req, res) => {
         }
 
         if (!uploadResult?.secure_url?.includes("cloudinary.com")) {
+          console.error(
+            "[mintNFT] Invalid Cloudinary response structure:",
+            uploadResult
+          );
           throw new Error("Invalid Cloudinary response after upload attempt");
         }
         finalImageUri = uploadResult.secure_url;
+        console.log(
+          `[mintNFT] Image processed/uploaded, final URI: ${finalImageUri}`
+        );
       } catch (uploadError) {
+        console.error(
+          "[mintNFT] Error during image upload/processing:",
+          uploadError
+        );
         return sendErrorResponse(
           res,
-          400,
-          "Failed to process image URI. Please ensure it's a valid image URL or Base64 string.",
+          500, // Changed to 500 as it's an internal server issue potentially
+          "Failed to process or upload image.",
           uploadError
         );
       }
@@ -175,35 +194,92 @@ exports.mintNFT = async (req, res) => {
         })) || [{ uri: finalImageUri, type: "image/webp" }], // Default if no files property
       },
     };
-
-    // --- Mint NFT via Solana Service ---
-    const mintServiceResult = await solanaService.mintNFT(
-      recipientPublicKey,
-      finalMetadata
+    console.log(
+      "[mintNFT] Final metadata prepared:",
+      finalMetadata.name,
+      finalMetadata.symbol
     );
 
-    // Safer regex pattern with error handling
-    const mintAddressMatch = mintServiceResult.match(/Mint Address: ([\w\d]+)/); // More specific regex
-    if (!mintAddressMatch?.[1]) {
-      console.error(
-        "[mintNFT] Could not extract mint address from service result:",
-        mintServiceResult
+    // --- Mint NFT via Solana Service (Specific Try-Catch) ---
+    let mintServiceResult;
+    let mintAddress;
+    try {
+      console.log(
+        "[mintNFT] Calling solanaService.mintNFT for:",
+        recipientPublicKey
       );
-      throw new Error("Failed to extract mint address after minting.");
-    }
-    const mintAddress = mintAddressMatch[1];
-    console.log(`[mintNFT] Extracted Mint Address: ${mintAddress}`);
+      mintServiceResult = await solanaService.mintNFT(
+        recipientPublicKey,
+        finalMetadata
+      );
+      console.log("[mintNFT] Solana service result:", mintServiceResult);
 
-    // --- Save NFT to Database ---
-    const newNFT = new NFT({
-      recipientPublicKey,
-      mintAddress,
-      uri: finalImageUri,
-      name: finalMetadata.name,
-      symbol: finalMetadata.symbol,
-    });
-    await newNFT.save();
-    console.log(`[mintNFT] NFT saved to database: ${mintAddress}`);
+      // Safer regex pattern with error handling
+      const mintAddressMatch = mintServiceResult.match(
+        /Mint Address: ([\w\d]+)/
+      ); // More specific regex
+      if (!mintAddressMatch?.[1]) {
+        console.error(
+          "[mintNFT] Could not extract mint address from service result:",
+          mintServiceResult
+        );
+        // Throw specific error to be caught by the outer catch block
+        throw new Error("Failed to extract mint address after minting.");
+      }
+      mintAddress = mintAddressMatch[1];
+      console.log(`[mintNFT] Extracted Mint Address: ${mintAddress}`);
+    } catch (solanaError) {
+      console.error(
+        "[mintNFT] Error during Solana minting call or address extraction:",
+        solanaError
+      );
+      // Check if it's the specific extraction error we threw
+      if (solanaError.message.includes("extract mint address")) {
+        return sendErrorResponse(
+          res,
+          500,
+          "Failed to confirm minting result from Solana service.",
+          solanaError
+        );
+      }
+      // Otherwise, assume it's an error from the service itself
+      return sendErrorResponse(
+        res,
+        500,
+        "Error occurred during the Solana NFT minting process.",
+        solanaError
+      );
+    }
+
+    // --- Save NFT to Database (Specific Try-Catch) ---
+    let newNFT;
+    try {
+      newNFT = new NFT({
+        recipientPublicKey,
+        mintAddress,
+        uri: finalImageUri,
+        name: finalMetadata.name,
+        symbol: finalMetadata.symbol,
+      });
+      await newNFT.save();
+      console.log(`[mintNFT] NFT saved to database: ${mintAddress}`);
+    } catch (dbError) {
+      console.error(
+        `[mintNFT] Error saving NFT ${mintAddress} to database:`,
+        dbError
+      );
+      // Important: Consider how to handle this. The NFT is minted on-chain but not saved.
+      // Options:
+      // 1. Log the error and maybe return a partial success or specific error message.
+      // 2. Try to delete/burn the minted NFT (complex).
+      // For now, returning a specific error is safest.
+      return sendErrorResponse(
+        res,
+        500,
+        `NFT minted (${mintAddress}) but failed to save to database. Please contact support.`,
+        dbError
+      );
+    }
 
     // --- Send Success Response ---
     return res.status(200).json({
@@ -211,33 +287,20 @@ exports.mintNFT = async (req, res) => {
       message: mintServiceResult, // Original message from service
       data: {
         mintAddress,
-        nft: newNFT,
+        nft: newNFT, // Send the saved NFT data
       },
     });
   } catch (error) {
-    // --- Error Handling ---
-    if (error.message.includes("Cloudinary")) {
-      return sendErrorResponse(
-        res,
-        500,
-        "A Cloudinary related error occurred during minting.",
-        error
-      );
-    }
-    if (error.message.includes("extract mint address")) {
-      return sendErrorResponse(
-        res,
-        500,
-        "Failed to confirm minting result.",
-        error
-      );
-    }
-    // Generic error
-    console.error("[mintNFT] Unexpected error during minting process:", error);
+    // --- Outer Catch-All (for truly unexpected errors) ---
+    // This catches errors not specifically handled above (e.g., in metadata prep)
+    console.error(
+      "[mintNFT] General unexpected error in mintNFT handler:",
+      error
+    );
     return sendErrorResponse(
       res,
       500,
-      "Failed to mint NFT due to an unexpected error.",
+      "An unexpected error occurred during the minting process.",
       error
     );
   }
