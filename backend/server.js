@@ -3,11 +3,48 @@ const mongoose = require("mongoose");
 const cors = require("cors");
 const dotenv = require("dotenv");
 const path = require("path");
+const cloudinary = require("cloudinary").v2;
 const tokenRoutes = require("./routes/tokenRoutes");
 const nftRoutes = require("./routes/nftRoutes");
 const airdropRoutes = require("./routes/airdropRoutes");
 
+// Load environment variables
 dotenv.config();
+
+// Validate required environment variables
+const requiredEnvVars = [
+  "CLOUDINARY_CLOUD_NAME",
+  "CLOUDINARY_API_KEY",
+  "CLOUDINARY_API_SECRET",
+  "MONGO_URI",
+];
+
+const missingEnvVars = requiredEnvVars.filter((envVar) => !process.env[envVar]);
+if (missingEnvVars.length > 0) {
+  console.error("Missing required environment variables:", missingEnvVars);
+  process.exit(1);
+}
+
+// Configure Cloudinary
+try {
+  cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET,
+  });
+
+  // Verify Cloudinary configuration
+  cloudinary.api
+    .ping()
+    .then((result) => console.log("Cloudinary configuration verified:", result))
+    .catch((error) => {
+      console.error("Cloudinary configuration error:", error);
+      process.exit(1);
+    });
+} catch (error) {
+  console.error("Failed to configure Cloudinary:", error);
+  process.exit(1);
+}
 
 const app = express();
 app.use(express.json());

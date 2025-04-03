@@ -6,12 +6,53 @@ const path = require("path");
 const cloudinary = require("cloudinary").v2;
 const fs = require("fs").promises;
 
-// Configure Cloudinary
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET,
+// Cloudinary configuration validation
+const validateCloudinaryConfig = () => {
+  const requiredConfigs = [
+    "CLOUDINARY_CLOUD_NAME",
+    "CLOUDINARY_API_KEY",
+    "CLOUDINARY_API_SECRET",
+  ];
+
+  const missingConfigs = requiredConfigs.filter(
+    (config) => !process.env[config]
+  );
+
+  if (missingConfigs.length > 0) {
+    throw new Error(
+      `Missing Cloudinary configuration: ${missingConfigs.join(", ")}`
+    );
+  }
+
+  return true;
+};
+
+// Standardized Cloudinary upload options
+const getCloudinaryOptions = (publicKey, customOptions = {}) => ({
+  folder: "solana-nfts",
+  resource_type: "image",
+  public_id: `${publicKey}-${Date.now()}`,
+  transformation: [
+    { quality: "auto:best" },
+    { fetch_format: "auto" },
+    { width: 1000, crop: "limit" },
+  ],
+  format: "webp",
+  ...customOptions,
 });
+
+// Configure Cloudinary with validation
+try {
+  validateCloudinaryConfig();
+  cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET,
+  });
+} catch (error) {
+  console.error("Cloudinary Configuration Error:", error);
+  // Don't throw here - let individual endpoints handle the error
+}
 
 // Configure multer for temporary file storage
 const storage = multer.diskStorage({
@@ -63,11 +104,15 @@ exports.mintNFT = async (req, res) => {
   }
 
   try {
+    // Validate Cloudinary configuration first
+    validateCloudinaryConfig();
+
     // Ensure image URL is from Cloudinary
     let imageUri = metadata.uri;
     if (!imageUri.includes("cloudinary.com")) {
-      // If the image is not from Cloudinary, try to fetch and upload it
       try {
+        let uploadResult;
+
         // For base64 images
         if (imageUri.startsWith("data:image")) {
           const base64Data = imageUri.split(",")[1];
@@ -79,44 +124,48 @@ exports.mintNFT = async (req, res) => {
           await fs.writeFile(tempPath, buffer);
 
           // Upload to Cloudinary
-          const result = await cloudinary.uploader.upload(tempPath, {
-            folder: "solana-nfts",
-            resource_type: "image",
-            public_id: `${recipientPublicKey}-${Date.now()}`,
-            transformation: [
-              { quality: "auto:best" },
-              { fetch_format: "auto" },
-            ],
-          });
+          uploadResult = await cloudinary.uploader.upload(
+            tempPath,
+            getCloudinaryOptions(recipientPublicKey)
+          );
 
           // Clean up temp file
-          await fs.unlink(tempPath);
-
-          imageUri = result.secure_url;
+          await fs.unlink(tempPath).catch(console.error);
         }
         // For URLs (including localhost)
         else {
-          const result = await cloudinary.uploader.upload(imageUri, {
-            folder: "solana-nfts",
-            resource_type: "image",
-            public_id: `${recipientPublicKey}-${Date.now()}`,
-            transformation: [
-              { quality: "auto:best" },
-              { fetch_format: "auto" },
-            ],
-          });
-          imageUri = result.secure_url;
+          uploadResult = await cloudinary.uploader.upload(
+            imageUri,
+            getCloudinaryOptions(recipientPublicKey)
+          );
         }
+
+        // Validate Cloudinary response
+        if (!uploadResult?.secure_url?.includes("cloudinary.com")) {
+          throw new Error(
+            "Invalid Cloudinary response: Missing or invalid secure_url"
+          );
+        }
+
+        imageUri = uploadResult.secure_url;
 
         // Update metadata with Cloudinary URL
         metadata.uri = imageUri;
         metadata.image = imageUri;
+
+        // Update properties.files array if it exists
+        if (metadata.properties?.files?.length > 0) {
+          metadata.properties.files = metadata.properties.files.map((file) => ({
+            ...file,
+            uri: imageUri,
+          }));
+        }
       } catch (uploadError) {
         console.error("Image Upload Error:", uploadError);
         return res.status(400).json({
           success: false,
           message:
-            "Failed to process image. Please upload image to Cloudinary first.",
+            "Failed to process image. Please ensure the image is accessible and in a supported format.",
           error: uploadError.message,
         });
       }
@@ -204,6 +253,9 @@ exports.transferNFT = async (req, res) => {
 
 exports.uploadImage = async (req, res) => {
   try {
+    // Validate Cloudinary configuration first
+    validateCloudinaryConfig();
+
     // Create temporary uploads directory if it doesn't exist
     await fs.mkdir("./tmp/uploads", { recursive: true });
 
@@ -234,8 +286,7 @@ exports.uploadImage = async (req, res) => {
       // Validate wallet address
       const wallet = req.body.wallet;
       if (!wallet) {
-        // Delete the temporary file
-        await fs.unlink(req.file.path);
+        await fs.unlink(req.file.path).catch(console.error);
         return res.status(400).json({
           success: false,
           message: "Wallet address is required",
@@ -243,41 +294,24 @@ exports.uploadImage = async (req, res) => {
       }
 
       try {
-        // Ensure Cloudinary is properly configured
-        if (
-          !process.env.CLOUDINARY_CLOUD_NAME ||
-          !process.env.CLOUDINARY_API_KEY ||
-          !process.env.CLOUDINARY_API_SECRET
-        ) {
-          throw new Error("Cloudinary configuration is missing");
-        }
+        // Upload to Cloudinary with standardized options
+        const result = await cloudinary.uploader.upload(
+          req.file.path,
+          getCloudinaryOptions(wallet)
+        );
 
-        // Upload to Cloudinary with specific options
-        const result = await cloudinary.uploader.upload(req.file.path, {
-          folder: "solana-nfts",
-          resource_type: "image",
-          public_id: `${wallet}-${Date.now()}`,
-          transformation: [
-            { quality: "auto:best" },
-            { fetch_format: "auto" },
-            { width: 1000, crop: "limit" },
-          ],
-          format: "webp",
-        });
-
-        // Delete the temporary file
-        await fs.unlink(req.file.path);
+        // Clean up temporary file
+        await fs.unlink(req.file.path).catch(console.error);
 
         // Validate Cloudinary response
-        if (
-          !result.secure_url ||
-          !result.secure_url.includes("cloudinary.com")
-        ) {
-          throw new Error("Invalid response from Cloudinary");
+        if (!result?.secure_url?.includes("cloudinary.com")) {
+          throw new Error(
+            "Invalid Cloudinary response: Missing or invalid secure_url"
+          );
         }
 
         // Return success with Cloudinary URL
-        res.status(200).json({
+        return res.status(200).json({
           success: true,
           message: "File uploaded successfully to Cloudinary",
           imageUrl: result.secure_url,
@@ -291,12 +325,25 @@ exports.uploadImage = async (req, res) => {
           },
         });
       } catch (cloudinaryError) {
-        // Delete the temporary file if Cloudinary upload fails
-        if (req.file && req.file.path) {
+        // Clean up temporary file if it exists
+        if (req.file?.path) {
           await fs.unlink(req.file.path).catch(console.error);
         }
+
+        // Determine if it's a configuration error
+        if (
+          cloudinaryError.message.includes("Missing Cloudinary configuration")
+        ) {
+          return res.status(500).json({
+            success: false,
+            message: "Cloudinary service is not properly configured",
+            error: cloudinaryError.message,
+          });
+        }
+
+        // Handle other Cloudinary errors
         console.error("Cloudinary Upload Error:", cloudinaryError);
-        res.status(500).json({
+        return res.status(500).json({
           success: false,
           message: "Failed to upload to Cloudinary",
           error: cloudinaryError.message,
@@ -305,7 +352,7 @@ exports.uploadImage = async (req, res) => {
     });
   } catch (error) {
     console.error("Image Upload Error:", error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: "Failed to process image upload",
       error: error.message,
