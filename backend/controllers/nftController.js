@@ -116,18 +116,27 @@ exports.mintNFT = async (req, res) => {
     );
   }
 
+  console.log("[mintNFT] Starting NFT minting process for:", {
+    recipientPublicKey,
+    metadataName: metadata.name,
+    metadataSymbol: metadata.symbol,
+    metadataUri: metadata.uri,
+  });
+
   try {
     let finalImageUri = metadata.uri;
 
     // --- Upload Image to Cloudinary if necessary ---
     if (!finalImageUri.includes("cloudinary.com")) {
+      console.log("[mintNFT] Image not on Cloudinary, attempting upload...");
       try {
         let uploadResult;
         if (finalImageUri.startsWith("data:image")) {
           // Handle Base64
+          console.log("[mintNFT] Processing base64 image...");
           const base64Data = finalImageUri.split(",")[1];
           const buffer = Buffer.from(base64Data, "base64");
-          const tempPath = `./tmp/uploads/${Date.now()}-image.png`; // Consider more robust temp naming
+          const tempPath = `./tmp/uploads/${Date.now()}-image.png`;
           await fs.mkdir("./tmp/uploads", { recursive: true });
           await fs.writeFile(tempPath, buffer);
           uploadResult = await cloudinary.uploader.upload(
@@ -137,10 +146,11 @@ exports.mintNFT = async (req, res) => {
           await fs
             .unlink(tempPath)
             .catch((err) =>
-              console.error("Failed to delete temp base64 file:", err)
+              console.error("[mintNFT] Failed to delete temp base64 file:", err)
             );
         } else {
           // Handle URL
+          console.log("[mintNFT] Processing image URL...");
           uploadResult = await cloudinary.uploader.upload(
             finalImageUri,
             getCloudinaryOptions(recipientPublicKey)
@@ -148,10 +158,19 @@ exports.mintNFT = async (req, res) => {
         }
 
         if (!uploadResult?.secure_url?.includes("cloudinary.com")) {
+          console.error(
+            "[mintNFT] Invalid Cloudinary upload result:",
+            uploadResult
+          );
           throw new Error("Invalid Cloudinary response after upload attempt");
         }
         finalImageUri = uploadResult.secure_url;
+        console.log(
+          "[mintNFT] Successfully uploaded image to Cloudinary:",
+          finalImageUri
+        );
       } catch (uploadError) {
+        console.error("[mintNFT] Image upload error:", uploadError);
         return sendErrorResponse(
           res,
           400,
@@ -164,26 +183,33 @@ exports.mintNFT = async (req, res) => {
     // --- Prepare Final Metadata ---
     const finalMetadata = {
       ...metadata,
-      uri: finalImageUri, // Ensure final Cloudinary URI
-      image: finalImageUri, // Ensure final Cloudinary image
+      uri: finalImageUri,
+      image: finalImageUri,
       properties: {
         ...(metadata.properties || {}),
         files: metadata.properties?.files?.map((file) => ({
-          // Update files array if present
           ...file,
           uri: finalImageUri,
-        })) || [{ uri: finalImageUri, type: "image/webp" }], // Default if no files property
+        })) || [{ uri: finalImageUri, type: "image/webp" }],
       },
     };
 
+    console.log("[mintNFT] Prepared final metadata:", {
+      name: finalMetadata.name,
+      symbol: finalMetadata.symbol,
+      uri: finalMetadata.uri,
+    });
+
     // --- Mint NFT via Solana Service ---
+    console.log("[mintNFT] Calling Solana service to mint NFT...");
     const mintServiceResult = await solanaService.mintNFT(
       recipientPublicKey,
       finalMetadata
     );
+    console.log("[mintNFT] Solana service response:", mintServiceResult);
 
     // Safer regex pattern with error handling
-    const mintAddressMatch = mintServiceResult.match(/Mint Address: ([\w\d]+)/); // More specific regex
+    const mintAddressMatch = mintServiceResult.match(/Mint Address: ([\w\d]+)/);
     if (!mintAddressMatch?.[1]) {
       console.error(
         "[mintNFT] Could not extract mint address from service result:",
@@ -195,6 +221,7 @@ exports.mintNFT = async (req, res) => {
     console.log(`[mintNFT] Extracted Mint Address: ${mintAddress}`);
 
     // --- Save NFT to Database ---
+    console.log("[mintNFT] Saving NFT to database...");
     const newNFT = new NFT({
       recipientPublicKey,
       mintAddress,
@@ -208,7 +235,7 @@ exports.mintNFT = async (req, res) => {
     // --- Send Success Response ---
     return res.status(200).json({
       success: true,
-      message: mintServiceResult, // Original message from service
+      message: mintServiceResult,
       data: {
         mintAddress,
         nft: newNFT,
@@ -216,6 +243,14 @@ exports.mintNFT = async (req, res) => {
     });
   } catch (error) {
     // --- Error Handling ---
+    console.error("[mintNFT] Error details:", {
+      error: error.message,
+      stack: error.stack,
+      recipientPublicKey,
+      metadataName: metadata?.name,
+      metadataSymbol: metadata?.symbol,
+    });
+
     if (error.message.includes("Cloudinary")) {
       return sendErrorResponse(
         res,
@@ -236,7 +271,7 @@ exports.mintNFT = async (req, res) => {
     return sendErrorResponse(
       res,
       500,
-      "Failed to mint NFT due to an unexpected error.",
+      `Failed to mint NFT: ${error.message}`,
       error
     );
   }
@@ -255,33 +290,214 @@ exports.getMintedNFTs = async (req, res) => {
 
 exports.fetchNFTs = async (req, res) => {
   const { publicKey } = req.query;
+
+  if (!publicKey) {
+    return sendErrorResponse(res, 400, "Wallet public key is required");
+  }
+
+  console.log(`[fetchNFTs] Fetching NFTs for wallet: ${publicKey}`);
+
   try {
-    const query = publicKey ? { recipientPublicKey: publicKey } : {};
-    const nfts = await NFT.find(query);
-    res.status(200).json(nfts);
+    // First, get NFTs from our database where this wallet is the recipient
+    const dbNFTs = await NFT.find({ recipientPublicKey: publicKey });
+    console.log(
+      `[fetchNFTs] Found ${dbNFTs.length} NFTs in database for ${publicKey}`
+    );
+
+    // Verify on-chain ownership for each NFT
+    const verifiedNFTs = [];
+    for (const nft of dbNFTs) {
+      try {
+        console.log(`[fetchNFTs] Verifying NFT ${nft.mintAddress}`);
+        // Get on-chain metadata and ownership info
+        const onChainData = await solanaService.getNFTMetadata(nft.mintAddress);
+
+        // If the NFT exists on-chain and ownership matches
+        if (onChainData && onChainData.owner === publicKey) {
+          // Merge database and on-chain data
+          verifiedNFTs.push({
+            ...nft.toObject(),
+            verified: true,
+            onChainOwner: onChainData.owner,
+          });
+          console.log(
+            `[fetchNFTs] Verified NFT ${nft.mintAddress} ownership matches`
+          );
+        } else {
+          console.log(
+            `[fetchNFTs] NFT ${nft.mintAddress} ownership mismatch or not found on-chain. DB owner: ${nft.recipientPublicKey}, Chain owner: ${onChainData?.owner}`
+          );
+        }
+      } catch (error) {
+        console.error(
+          `[fetchNFTs] Error verifying NFT ${nft.mintAddress}:`,
+          error
+        );
+        // Include the NFT but mark it as unverified
+        verifiedNFTs.push({
+          ...nft.toObject(),
+          verified: false,
+          verificationError: error.message,
+        });
+      }
+    }
+
+    // Also check for any NFTs owned by this wallet on-chain that might not be in our DB
+    try {
+      console.log(`[fetchNFTs] Checking on-chain NFTs for ${publicKey}`);
+      const onChainNFTs = await solanaService.getWalletNFTs(publicKey);
+      console.log(
+        `[fetchNFTs] Found ${onChainNFTs.length} NFTs on-chain for ${publicKey}`
+      );
+
+      for (const onChainNFT of onChainNFTs) {
+        // Check if this NFT is already in our verified list
+        const exists = verifiedNFTs.some(
+          (nft) => nft.mintAddress === onChainNFT.mintAddress
+        );
+
+        if (!exists) {
+          console.log(
+            `[fetchNFTs] Found new on-chain NFT: ${onChainNFT.mintAddress}`
+          );
+          // Add this NFT to our database
+          const newNFT = new NFT({
+            mintAddress: onChainNFT.mintAddress,
+            recipientPublicKey: publicKey,
+            name: onChainNFT.name || "Unknown NFT",
+            symbol: onChainNFT.symbol || "NFT",
+            uri: onChainNFT.uri || "",
+          });
+
+          try {
+            await newNFT.save();
+            verifiedNFTs.push({
+              ...newNFT.toObject(),
+              verified: true,
+              onChainOwner: publicKey,
+              newlyDiscovered: true,
+            });
+            console.log(
+              `[fetchNFTs] Saved new NFT to database: ${onChainNFT.mintAddress}`
+            );
+          } catch (saveError) {
+            console.error(
+              `[fetchNFTs] Error saving new NFT ${onChainNFT.mintAddress}:`,
+              saveError
+            );
+          }
+        }
+      }
+    } catch (onChainError) {
+      console.error("[fetchNFTs] Error fetching on-chain NFTs:", onChainError);
+    }
+
+    console.log(
+      `[fetchNFTs] Returning ${verifiedNFTs.length} verified NFTs for ${publicKey}`
+    );
+    return res.status(200).json({
+      success: true,
+      data: verifiedNFTs,
+      message: `Found ${verifiedNFTs.length} NFTs for wallet ${publicKey}`,
+    });
   } catch (error) {
-    res
-      .status(500)
-      .json({ message: "Failed to fetch NFTs", error: error.message });
+    console.error("[fetchNFTs] Fatal error:", error);
+    return sendErrorResponse(res, 500, "Failed to fetch NFTs", error);
   }
 };
 
 exports.transferNFT = async (req, res) => {
   const { mintAddress, recipientPublicKey } = req.body;
 
+  // --- Input Validation ---
+  if (!mintAddress || !recipientPublicKey) {
+    return sendErrorResponse(
+      res,
+      400,
+      "Missing required fields: mintAddress or recipientPublicKey"
+    );
+  }
+  // Basic validation for recipient public key format (example)
+  if (
+    typeof recipientPublicKey !== "string" ||
+    recipientPublicKey.length < 32 ||
+    recipientPublicKey.length > 44
+  ) {
+    return sendErrorResponse(res, 400, "Invalid recipient public key format.");
+  }
+
   try {
-    const senderKeypair = loadKeypair();
-    const transferResponse = await solanaService.transferNFT(
+    // --- Perform On-Chain Transfer ---
+    const senderKeypair = loadKeypair(); // Assuming this loads the app's main wallet keypair
+    console.log(
+      `[transferNFT] Attempting transfer of ${mintAddress} to ${recipientPublicKey}`
+    );
+
+    const transferServiceResponse = await solanaService.transferNFT(
       mintAddress,
       senderKeypair,
       recipientPublicKey
     );
 
-    res.status(200).json({ message: transferResponse });
+    console.log(
+      `[transferNFT] On-chain transfer successful for ${mintAddress}. Response: ${transferServiceResponse}`
+    );
+
+    // --- Update Database Record ---
+    const updatedNft = await NFT.findOneAndUpdate(
+      { mintAddress: mintAddress },
+      { $set: { recipientPublicKey: recipientPublicKey } },
+      { new: true } // Return the updated document
+    );
+
+    if (!updatedNft) {
+      // This case is unlikely if the transfer succeeded, but handle defensively
+      console.warn(
+        `[transferNFT] NFT with mint address ${mintAddress} not found in DB after successful on-chain transfer.`
+      );
+      // Decide if this should be an error or just a warning.
+      // Returning success as the main action (on-chain transfer) succeeded.
+    } else {
+      console.log(
+        `[transferNFT] Database record updated for ${mintAddress}. New owner: ${recipientPublicKey}`
+      );
+    }
+
+    // --- Send Success Response ---
+    return res.status(200).json({
+      success: true,
+      message:
+        transferServiceResponse ||
+        "NFT transferred successfully and database updated.", // Use service message or default
+      data: {
+        updatedNft: updatedNft, // Optionally return updated DB record
+      },
+    });
   } catch (error) {
-    res
-      .status(500)
-      .json({ message: "NFT transfer failed", error: error.message });
+    // --- Error Handling ---
+    if (error.message.includes("Failed to find token account")) {
+      return sendErrorResponse(
+        res,
+        404,
+        "NFT or associated token account not found on-chain.",
+        error
+      );
+    }
+    if (error.message.includes("owner does not match")) {
+      return sendErrorResponse(
+        res,
+        403,
+        "Transfer failed: Sender does not own the NFT.",
+        error
+      );
+    }
+    // Handle other potential errors from solanaService or DB update
+    return sendErrorResponse(
+      res,
+      500,
+      "NFT transfer failed due to an unexpected error.",
+      error
+    );
   }
 };
 
@@ -560,5 +776,44 @@ exports.deleteNFT = async (req, res) => {
       message: "Failed to delete NFT",
       error: error.message,
     });
+  }
+};
+
+// Add helper function to sync NFT ownership with blockchain
+exports.syncNFTOwnership = async (mintAddress) => {
+  try {
+    const nft = await NFT.findOne({ mintAddress });
+    if (!nft) {
+      console.warn(`NFT ${mintAddress} not found in database for sync`);
+      return null;
+    }
+
+    // Get on-chain owner
+    const onChainData = await solanaService.getNFTMetadata(mintAddress);
+    if (!onChainData || !onChainData.owner) {
+      console.warn(`Could not fetch on-chain data for NFT ${mintAddress}`);
+      return null;
+    }
+
+    // Update database if ownership has changed
+    if (nft.recipientPublicKey !== onChainData.owner) {
+      const updatedNFT = await NFT.findOneAndUpdate(
+        { mintAddress },
+        {
+          recipientPublicKey: onChainData.owner,
+          lastSyncedAt: new Date(),
+        },
+        { new: true }
+      );
+      console.log(
+        `Updated ownership for NFT ${mintAddress} to ${onChainData.owner}`
+      );
+      return updatedNFT;
+    }
+
+    return nft;
+  } catch (error) {
+    console.error(`Error syncing NFT ${mintAddress}:`, error);
+    return null;
   }
 };

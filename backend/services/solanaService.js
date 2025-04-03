@@ -35,11 +35,24 @@ const connection = new Connection(clusterApiUrl("devnet"));
 
 const mintNFT = async (recipientPublicKey, metadata) => {
   try {
-    const recipientKey = new PublicKey(recipientPublicKey);
+    console.log("[mintNFT] Starting NFT minting process with Metaplex...");
+    console.log("[mintNFT] Recipient:", recipientPublicKey);
+    console.log("[mintNFT] Metadata:", {
+      name: metadata.name,
+      symbol: metadata.symbol,
+      uri: metadata.uri,
+    });
 
+    const recipientKey = new PublicKey(recipientPublicKey);
     const { uri, name, symbol } = metadata;
 
+    // Validate URI
+    if (!uri || typeof uri !== "string") {
+      throw new Error("Invalid URI in metadata");
+    }
+
     // Call the Metaplex `create` method without `.run()`
+    console.log("[mintNFT] Creating NFT with Metaplex...");
     const nft = await metaplex.nfts().create({
       uri,
       name,
@@ -54,13 +67,32 @@ const mintNFT = async (recipientPublicKey, metadata) => {
       updateAuthority: payerKeypair,
     });
 
+    if (!nft?.mintAddress) {
+      console.error("[mintNFT] Invalid Metaplex response:", nft);
+      throw new Error("Metaplex did not return a valid mint address");
+    }
+
     console.log(
-      "NFT created with Token Metadata program:",
+      "[mintNFT] NFT created successfully:",
       nft.mintAddress.toString()
     );
     return `NFT minted successfully, Mint Address: ${nft.mintAddress.toString()}`;
   } catch (error) {
-    console.error("NFT Minting Error:", error.message);
+    console.error("[mintNFT] Solana Service Error:", {
+      error: error.message,
+      stack: error.stack,
+      recipientPublicKey,
+      metadataName: metadata?.name,
+    });
+
+    // Check for specific error types
+    if (error.message.includes("insufficient funds")) {
+      throw new Error("Insufficient funds to mint NFT");
+    }
+    if (error.message.includes("Invalid URI")) {
+      throw new Error("Invalid metadata URI provided");
+    }
+
     throw new Error(`Failed to mint NFT: ${error.message}`);
   }
 };
@@ -496,6 +528,7 @@ const getNFTMetadata = async (mintAddress) => {
       uri: nft.uri,
       description: "Metadata unavailable",
       attributes: [],
+      owner: nft.owner?.toString() || nft.ownerAddress?.toString(), // Include owner information
     };
 
     // If the URI is a placeholder image or doesn't exist, return basic metadata
@@ -535,6 +568,7 @@ const getNFTMetadata = async (mintAddress) => {
         attributes: Array.isArray(metadata.attributes)
           ? metadata.attributes
           : [],
+        owner: baseMetadata.owner, // Preserve owner information
       };
     } catch (error) {
       // Log the specific fetch error but don't throw
@@ -547,6 +581,29 @@ const getNFTMetadata = async (mintAddress) => {
   } catch (error) {
     console.error("Error in getNFTMetadata:", error);
     throw new Error(`Failed to fetch NFT metadata: ${error.message}`);
+  }
+};
+
+const getWalletNFTs = async (walletAddress) => {
+  try {
+    const walletPublicKey = new PublicKey(walletAddress);
+
+    // Fetch all NFTs owned by this wallet using Metaplex
+    const nfts = await metaplex.nfts().findAllByOwner({
+      owner: walletPublicKey,
+    });
+
+    // Map the NFTs to a consistent format
+    return nfts.map((nft) => ({
+      mintAddress: nft.address.toString(),
+      name: nft.name,
+      symbol: nft.symbol,
+      uri: nft.uri,
+      owner: nft.ownerAddress.toString(),
+    }));
+  } catch (error) {
+    console.error("Error in getWalletNFTs:", error);
+    throw new Error(`Failed to fetch wallet NFTs: ${error.message}`);
   }
 };
 
@@ -566,4 +623,5 @@ module.exports = {
   delegateToken,
   closeTokenAccount,
   getNFTMetadata,
+  getWalletNFTs,
 };
