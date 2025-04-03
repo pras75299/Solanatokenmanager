@@ -34,66 +34,106 @@ const connection = new Connection(clusterApiUrl("devnet"));
 // solanaService.js
 
 const mintNFT = async (recipientPublicKey, metadata) => {
-  try {
-    console.log("[mintNFT] Starting NFT minting process with Metaplex...");
-    console.log("[mintNFT] Recipient:", recipientPublicKey);
-    console.log("[mintNFT] Metadata:", {
-      name: metadata.name,
-      symbol: metadata.symbol,
-      uri: metadata.uri,
-    });
+  const MAX_RETRIES = 3;
+  const RETRY_DELAY = 2000; // 2 seconds
 
-    const recipientKey = new PublicKey(recipientPublicKey);
-    const { uri, name, symbol } = metadata;
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-    // Validate URI
-    if (!uri || typeof uri !== "string") {
-      throw new Error("Invalid URI in metadata");
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      console.log(`[mintNFT] Attempt ${attempt}/${MAX_RETRIES} to mint NFT...`);
+      console.log("[mintNFT] Recipient:", recipientPublicKey);
+      console.log("[mintNFT] Metadata:", {
+        name: metadata.name,
+        symbol: metadata.symbol,
+        uri: metadata.uri,
+      });
+
+      const recipientKey = new PublicKey(recipientPublicKey);
+      const { uri, name, symbol } = metadata;
+
+      // Validate URI
+      if (!uri || typeof uri !== "string") {
+        throw new Error("Invalid URI in metadata");
+      }
+
+      // Get latest blockhash before each attempt
+      const { blockhash, lastValidBlockHeight } =
+        await connection.getLatestBlockhash("finalized");
+
+      console.log("[mintNFT] Creating NFT with Metaplex...");
+      const nft = await metaplex.nfts().create({
+        uri,
+        name,
+        symbol,
+        sellerFeeBasisPoints: 500, // 5% royalties
+        creators: [
+          {
+            address: payerKeypair.publicKey,
+            share: 100,
+          },
+        ],
+        updateAuthority: payerKeypair,
+      });
+
+      if (!nft?.mintAddress) {
+        console.error("[mintNFT] Invalid Metaplex response:", nft);
+        throw new Error("Metaplex did not return a valid mint address");
+      }
+
+      // Wait for transaction confirmation with timeout
+      const confirmationStatus = await connection.confirmTransaction({
+        signature: nft.response.signature,
+        blockhash: blockhash,
+        lastValidBlockHeight: lastValidBlockHeight,
+      });
+
+      if (confirmationStatus.value.err) {
+        throw new Error(`Transaction failed: ${confirmationStatus.value.err}`);
+      }
+
+      console.log(
+        "[mintNFT] NFT created successfully:",
+        nft.mintAddress.toString()
+      );
+      return `NFT minted successfully, Mint Address: ${nft.mintAddress.toString()}`;
+    } catch (error) {
+      console.error(`[mintNFT] Attempt ${attempt} failed:`, {
+        error: error.message,
+        stack: error.stack,
+        recipientPublicKey,
+        metadataName: metadata?.name,
+      });
+
+      // Check for specific error types
+      if (error.message.includes("insufficient funds")) {
+        throw new Error("Insufficient funds to mint NFT");
+      }
+      if (error.message.includes("Invalid URI")) {
+        throw new Error("Invalid metadata URI provided");
+      }
+
+      // If this was the last attempt, throw the error
+      if (attempt === MAX_RETRIES) {
+        throw new Error(
+          `Failed to mint NFT after ${MAX_RETRIES} attempts: ${error.message}`
+        );
+      }
+
+      // If the error is related to block height or timeout, wait and retry
+      if (
+        error.message.includes("block height exceeded") ||
+        error.message.includes("timeout") ||
+        error.message.includes("expired")
+      ) {
+        console.log(`[mintNFT] Retrying in ${RETRY_DELAY}ms...`);
+        await sleep(RETRY_DELAY);
+        continue;
+      }
+
+      // For other errors, throw immediately
+      throw error;
     }
-
-    // Call the Metaplex `create` method without `.run()`
-    console.log("[mintNFT] Creating NFT with Metaplex...");
-    const nft = await metaplex.nfts().create({
-      uri,
-      name,
-      symbol,
-      sellerFeeBasisPoints: 500, // 5% royalties
-      creators: [
-        {
-          address: payerKeypair.publicKey,
-          share: 100,
-        },
-      ],
-      updateAuthority: payerKeypair,
-    });
-
-    if (!nft?.mintAddress) {
-      console.error("[mintNFT] Invalid Metaplex response:", nft);
-      throw new Error("Metaplex did not return a valid mint address");
-    }
-
-    console.log(
-      "[mintNFT] NFT created successfully:",
-      nft.mintAddress.toString()
-    );
-    return `NFT minted successfully, Mint Address: ${nft.mintAddress.toString()}`;
-  } catch (error) {
-    console.error("[mintNFT] Solana Service Error:", {
-      error: error.message,
-      stack: error.stack,
-      recipientPublicKey,
-      metadataName: metadata?.name,
-    });
-
-    // Check for specific error types
-    if (error.message.includes("insufficient funds")) {
-      throw new Error("Insufficient funds to mint NFT");
-    }
-    if (error.message.includes("Invalid URI")) {
-      throw new Error("Invalid metadata URI provided");
-    }
-
-    throw new Error(`Failed to mint NFT: ${error.message}`);
   }
 };
 
