@@ -6,6 +6,12 @@ const path = require("path");
 const cloudinary = require("cloudinary").v2;
 const fs = require("fs").promises;
 const dotenv = require("dotenv");
+const {
+  Connection,
+  Transaction,
+  sendAndConfirmRawTransaction,
+  clusterApiUrl,
+} = require("@solana/web3.js");
 
 // Cloudinary configuration validation
 const validateCloudinaryConfig = () => {
@@ -101,6 +107,20 @@ const sendErrorResponse = (res, statusCode, message, error = null) => {
     // Provide the error message, or the string representation if it's not an Error object
     error: error ? error.message || String(error) : undefined,
   });
+};
+
+// Helper: Get Solana Connection
+let connection;
+const getSolanaConnection = () => {
+  if (!connection) {
+    const network = process.env.SOLANA_NETWORK || "devnet";
+    const rpcUrl = process.env.SOLANA_RPC_URL || clusterApiUrl(network);
+    connection = new Connection(rpcUrl, "confirmed");
+    console.log(
+      `[Solana Connection] Initialized for network: ${network} at ${rpcUrl}`
+    );
+  }
+  return connection;
 };
 
 exports.mintNFT = async (req, res) => {
@@ -331,21 +351,81 @@ exports.fetchNFTs = async (req, res) => {
 };
 
 exports.transferNFT = async (req, res) => {
-  const { mintAddress, recipientPublicKey } = req.body;
+  const { serializedTransaction } = req.body;
 
+  // Basic Validation
+  if (!serializedTransaction) {
+    return sendErrorResponse(res, 400, "Missing serialized transaction data.");
+  }
+
+  let transaction;
   try {
-    const senderKeypair = loadKeypair();
-    const transferResponse = await solanaService.transferNFT(
-      mintAddress,
-      senderKeypair,
-      recipientPublicKey
+    // Deserialize Transaction
+    const transactionBuffer = Buffer.from(serializedTransaction, "base64");
+    transaction = Transaction.from(transactionBuffer);
+
+    // Basic Sanity Checks
+    if (
+      !transaction.signatures ||
+      transaction.signatures.length === 0 ||
+      !transaction.signatures[0].publicKey
+    ) {
+      throw new Error(
+        "Transaction is missing signatures or fee payer information."
+      );
+    }
+    console.log(
+      `[transferNFT Relay] Received transaction signed by: ${transaction.signatures[0].publicKey.toString()}`
+    );
+  } catch (error) {
+    console.error(
+      "[transferNFT Relay] Error deserializing or validating transaction:",
+      error
+    );
+    return sendErrorResponse(
+      res,
+      400,
+      "Invalid transaction data received.",
+      error
+    );
+  }
+
+  // Send and Confirm Transaction
+  try {
+    const connection = getSolanaConnection();
+    console.log(
+      "[transferNFT Relay] Sending raw transaction to Solana network..."
     );
 
-    res.status(200).json({ message: transferResponse });
+    const signature = await sendAndConfirmRawTransaction(
+      connection,
+      transaction.serialize(),
+      {
+        skipPreflight: true,
+        commitment: "confirmed",
+        maxRetries: 5,
+      }
+    );
+
+    console.log(
+      `[transferNFT Relay] Transaction successfully relayed. Signature: ${signature}`
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Transaction successfully relayed and confirmed.",
+      signature: signature,
+    });
   } catch (error) {
-    res
-      .status(500)
-      .json({ message: "NFT transfer failed", error: error.message });
+    console.error(
+      "[transferNFT Relay] Error sending/confirming transaction:",
+      error
+    );
+    let errorMessage = "Failed to relay transaction to Solana network.";
+    if (error instanceof Error) {
+      errorMessage += ` Details: ${error.message}`;
+    }
+    return sendErrorResponse(res, 500, errorMessage, error);
   }
 };
 
