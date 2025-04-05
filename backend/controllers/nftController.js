@@ -355,37 +355,55 @@ exports.transferNFT = async (req, res) => {
 
   // Basic Validation
   if (!serializedTransaction) {
+    console.error("[transferNFT] Missing serialized transaction data");
     return sendErrorResponse(res, 400, "Missing serialized transaction data.");
   }
 
   let transaction;
   try {
-    // Deserialize Transaction
+    // Deserialize Transaction with detailed logging
+    console.log("[transferNFT] Attempting to deserialize transaction...");
     const transactionBuffer = Buffer.from(serializedTransaction, "base64");
     transaction = Transaction.from(transactionBuffer);
 
-    // Basic Sanity Checks
-    if (
-      !transaction.signatures ||
-      transaction.signatures.length === 0 ||
-      !transaction.signatures[0].publicKey
-    ) {
-      throw new Error(
-        "Transaction is missing signatures or fee payer information."
-      );
+    // Log transaction details for debugging
+    console.log("[transferNFT] Transaction details:", {
+      numInstructions: transaction.instructions.length,
+      signers: transaction.signatures.map((s) => s.publicKey.toBase58()),
+      recentBlockhash: transaction.recentBlockhash,
+      feePayer: transaction.feePayer?.toBase58(),
+    });
+
+    // Basic Sanity Checks with detailed errors
+    if (!transaction.signatures || transaction.signatures.length === 0) {
+      throw new Error("Transaction is missing signatures");
     }
+    if (!transaction.feePayer) {
+      throw new Error("Transaction is missing fee payer");
+    }
+    if (!transaction.recentBlockhash) {
+      throw new Error("Transaction is missing recent blockhash");
+    }
+    if (transaction.instructions.length === 0) {
+      throw new Error("Transaction has no instructions");
+    }
+
     console.log(
-      `[transferNFT Relay] Received transaction signed by: ${transaction.signatures[0].publicKey.toString()}`
+      `[transferNFT] Transaction validation passed. Signed by: ${transaction.signatures[0].publicKey.toString()}`
     );
   } catch (error) {
     console.error(
-      "[transferNFT Relay] Error deserializing or validating transaction:",
-      error
+      "[transferNFT] Transaction deserialization/validation error:",
+      {
+        error: error.message,
+        stack: error.stack,
+        serializedLength: serializedTransaction?.length,
+      }
     );
     return sendErrorResponse(
       res,
       400,
-      "Invalid transaction data received.",
+      `Invalid transaction data: ${error.message}`,
       error
     );
   }
@@ -394,38 +412,86 @@ exports.transferNFT = async (req, res) => {
   try {
     const connection = getSolanaConnection();
     console.log(
-      "[transferNFT Relay] Sending raw transaction to Solana network..."
+      "[transferNFT] Connected to Solana network, preparing to send transaction..."
+    );
+
+    // Log connection details
+    const rpcEndpoint = connection.rpcEndpoint;
+    console.log(`[transferNFT] Using RPC endpoint: ${rpcEndpoint}`);
+
+    // Verify the transaction can be simulated before sending
+    console.log("[transferNFT] Simulating transaction...");
+    const simulation = await connection.simulateTransaction(transaction);
+
+    if (simulation.value.err) {
+      console.error(
+        "[transferNFT] Transaction simulation failed:",
+        simulation.value
+      );
+      throw new Error(
+        `Transaction simulation failed: ${JSON.stringify(simulation.value.err)}`
+      );
+    }
+
+    console.log(
+      "[transferNFT] Transaction simulation successful, sending transaction..."
     );
 
     const signature = await sendAndConfirmRawTransaction(
       connection,
       transaction.serialize(),
       {
-        skipPreflight: true,
+        skipPreflight: false, // Changed to false to catch errors early
         commitment: "confirmed",
         maxRetries: 5,
+        preflightCommitment: "processed",
       }
     );
 
     console.log(
-      `[transferNFT Relay] Transaction successfully relayed. Signature: ${signature}`
+      `[transferNFT] Transaction successfully sent and confirmed. Signature: ${signature}`
     );
+
+    // Verify the transaction was successful
+    const confirmedTx = await connection.getTransaction(signature, {
+      commitment: "confirmed",
+    });
+
+    if (!confirmedTx) {
+      throw new Error("Transaction confirmation verification failed");
+    }
 
     return res.status(200).json({
       success: true,
       message: "Transaction successfully relayed and confirmed.",
       signature: signature,
+      confirmationDetails: {
+        slot: confirmedTx.slot,
+        confirmations: confirmedTx.confirmations,
+      },
     });
   } catch (error) {
-    console.error(
-      "[transferNFT Relay] Error sending/confirming transaction:",
-      error
-    );
+    console.error("[transferNFT] Transaction sending/confirmation error:", {
+      error: error.message,
+      stack: error.stack,
+      errorLogs: error.logs || "No logs available",
+    });
+
+    // Provide more specific error messages based on common failure cases
     let errorMessage = "Failed to relay transaction to Solana network.";
-    if (error instanceof Error) {
-      errorMessage += ` Details: ${error.message}`;
+    if (error.message.includes("blockhash")) {
+      errorMessage = "Transaction blockhash expired. Please try again.";
+    } else if (error.message.includes("insufficient funds")) {
+      errorMessage = "Insufficient funds for transaction.";
+    } else if (error.message.includes("invalid account owner")) {
+      errorMessage = "Invalid token account ownership.";
     }
-    return sendErrorResponse(res, 500, errorMessage, error);
+
+    return sendErrorResponse(res, 500, errorMessage, {
+      originalError: error.message,
+      logs: error.logs || [],
+      details: error.details || "No additional details",
+    });
   }
 };
 
