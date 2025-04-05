@@ -51,11 +51,11 @@ export default function Navbar() {
         {/* Desktop navigation */}
         <div className="hidden md:flex items-center space-x-6">
           <NavLink to="/dashboard" label="Dashboard" />
+          <NavLink to="/mint-token" label="Mint Token" />
+          <NavLink to="/tokens" label="Tokens" />
           <NavLink to="/burn" label="Burn" />
           <NavLink to="/delegate" label="Delegate" />
           <NavLink to="/mint-nft" label="Mint NFT" />
-          <NavLink to="/mint-token" label="Mint Token" />
-          <NavLink to="/tokens" label="Tokens" />
           <NavLink to="/nft-collection" label="NFT Collection" />
         </div>
 
@@ -84,7 +84,7 @@ export default function Navbar() {
           ref={sidebarRef}
           className={`fixed inset-y-0 right-0 transform ${
             isOpen ? "translate-x-0" : "translate-x-full"
-          } w-64 bg-[#0F1419] border-l border-gray-800 p-6 space-y-6 transition-transform duration-200 ease-in-out md:hidden`}
+          } w-64 bg-[#0F1419] border-l border-gray-800 p-6 space-y-6 transition-transform duration-200 ease-in-out md:hidden z-50`}
         >
           <div className="space-y-6">
             <MobileNavLink
