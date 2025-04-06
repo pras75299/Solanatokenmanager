@@ -111,7 +111,7 @@ const airdropSol = async (publicKey) => {
   try {
     const airdropSignature = await connection.requestAirdrop(
       new PublicKey(publicKey),
-      4 * LAMPORTS_PER_SOL
+      2 * LAMPORTS_PER_SOL
     );
     await connection.confirmTransaction(airdropSignature);
     return "Airdrop successful!";

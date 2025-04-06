@@ -35,6 +35,7 @@ import BurnPage from "./pages/BurnPage";
 import DelegatePage from "./pages/DelegatePage";
 import MintTokenPage from "./pages/MintTokenPage";
 import TokensPage from "./pages/TokensPage";
+import AirdropPage from "./pages/AirdropPage";
 
 // Protected Route Component
 const ProtectedRoute = ({ children }) => {
@@ -118,6 +119,14 @@ const App = () => {
                       element={
                         <ProtectedRoute>
                           <DashboardPage />
+                        </ProtectedRoute>
+                      }
+                    />
+                    <Route
+                      path="/airdrop"
+                      element={
+                        <ProtectedRoute>
+                          <AirdropPage />
                         </ProtectedRoute>
                       }
                     />

@@ -51,6 +51,7 @@ export default function Navbar() {
         {/* Desktop navigation */}
         <div className="hidden md:flex items-center space-x-6">
           <NavLink to="/dashboard" label="Dashboard" />
+          <NavLink to="/airdrop" label="Airdrop" />
           <NavLink to="/mint-token" label="Mint Token" />
           <NavLink to="/tokens" label="Tokens" />
           <NavLink to="/burn" label="Burn" />
@@ -90,6 +91,11 @@ export default function Navbar() {
             <MobileNavLink
               to="/dashboard"
               label="Dashboard"
+              onClick={() => setIsOpen(false)}
+            />
+            <MobileNavLink
+              to="/airdrop"
+              label="Airdrop"
               onClick={() => setIsOpen(false)}
             />
             <MobileNavLink
