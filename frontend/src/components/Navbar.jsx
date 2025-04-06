@@ -52,12 +52,6 @@ export default function Navbar() {
         <div className="hidden md:flex items-center space-x-6">
           <NavLink to="/dashboard" label="Dashboard" />
           <NavLink to="/airdrop" label="Airdrop" />
-          <NavLink to="/mint-token" label="Mint Token" />
-          <NavLink to="/tokens" label="Tokens" />
-          <NavLink to="/burn" label="Burn" />
-          <NavLink to="/delegate" label="Delegate" />
-          <NavLink to="/mint-nft" label="Mint NFT" />
-          <NavLink to="/nft-collection" label="NFT Collection" />
         </div>
 
         {/* Desktop Connect Wallet */}
@@ -96,31 +90,6 @@ export default function Navbar() {
             <MobileNavLink
               to="/airdrop"
               label="Airdrop"
-              onClick={() => setIsOpen(false)}
-            />
-            <MobileNavLink
-              to="/burn"
-              label="Burn"
-              onClick={() => setIsOpen(false)}
-            />
-            <MobileNavLink
-              to="/delegate"
-              label="Delegate"
-              onClick={() => setIsOpen(false)}
-            />
-            <MobileNavLink
-              to="/mint-token"
-              label="Mint Token"
-              onClick={() => setIsOpen(false)}
-            />
-            <MobileNavLink
-              to="/tokens"
-              label="Tokens"
-              onClick={() => setIsOpen(false)}
-            />
-            <MobileNavLink
-              to="/nft-collection"
-              label="NFT Collection"
               onClick={() => setIsOpen(false)}
             />
           </div>

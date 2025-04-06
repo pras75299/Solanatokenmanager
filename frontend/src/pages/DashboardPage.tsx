@@ -94,12 +94,20 @@ const DashboardPage = () => {
 
             <div className="grid grid-cols-2 gap-4">
               <MotionLink
-                to="/create-token"
+                to="/mint-token"
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
                 className="bg-gradient-to-r from-purple-500 to-blue-500 p-4 rounded-lg text-center text-white font-semibold hover:from-purple-600 hover:to-blue-600 transition-all duration-200"
               >
-                Create Token
+                Mint Token
+              </MotionLink>
+              <MotionLink
+                to="/tokens"
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                className="bg-gradient-to-r from-purple-500 to-blue-500 p-4 rounded-lg text-center text-white font-semibold hover:from-purple-600 hover:to-blue-600 transition-all duration-200"
+              >
+                Tokens
               </MotionLink>
               <MotionLink
                 to="/burn"
@@ -124,6 +132,14 @@ const DashboardPage = () => {
                 className="bg-gradient-to-r from-pink-500 to-purple-500 p-4 rounded-lg text-center text-white font-semibold hover:from-pink-600 hover:to-purple-600 transition-all duration-200"
               >
                 Mint NFT
+              </MotionLink>
+              <MotionLink
+                to="/nft-collection"
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                className="bg-gradient-to-r from-pink-500 to-purple-500 p-4 rounded-lg text-center text-white font-semibold hover:from-pink-600 hover:to-purple-600 transition-all duration-200"
+              >
+                NFT Collection
               </MotionLink>
             </div>
           </GlowingCard>
