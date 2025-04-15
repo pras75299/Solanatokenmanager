@@ -419,56 +419,41 @@ exports.transferNFT = async (req, res) => {
     const rpcEndpoint = connection.rpcEndpoint;
     console.log(`[transferNFT] Using RPC endpoint: ${rpcEndpoint}`);
 
-    // Verify the transaction can be simulated before sending
-    console.log("[transferNFT] Simulating transaction...");
-    const simulation = await connection.simulateTransaction(transaction);
+    // Send transaction without simulation
+    console.log("[transferNFT] Sending transaction...");
+    const rawTransaction = transaction.serialize();
 
-    if (simulation.value.err) {
-      console.error(
-        "[transferNFT] Transaction simulation failed:",
-        simulation.value
-      );
-      throw new Error(
-        `Transaction simulation failed: ${JSON.stringify(simulation.value.err)}`
-      );
-    }
-
-    console.log(
-      "[transferNFT] Transaction simulation successful, sending transaction..."
-    );
-
-    const signature = await sendAndConfirmRawTransaction(
-      connection,
-      transaction.serialize(),
-      {
-        skipPreflight: false, // Changed to false to catch errors early
-        commitment: "confirmed",
-        maxRetries: 5,
-        preflightCommitment: "processed",
-      }
-    );
-
-    console.log(
-      `[transferNFT] Transaction successfully sent and confirmed. Signature: ${signature}`
-    );
-
-    // Verify the transaction was successful
-    const confirmedTx = await connection.getTransaction(signature, {
-      commitment: "confirmed",
+    const signature = await connection.sendRawTransaction(rawTransaction, {
+      skipPreflight: true,
+      maxRetries: 3,
+      preflightCommitment: "processed",
     });
 
-    if (!confirmedTx) {
-      throw new Error("Transaction confirmation verification failed");
+    console.log(`[transferNFT] Transaction sent. Signature: ${signature}`);
+
+    // Wait for confirmation
+    const confirmation = await connection.confirmTransaction(
+      {
+        signature,
+        blockhash: transaction.recentBlockhash,
+        lastValidBlockHeight: transaction.lastValidBlockHeight,
+      },
+      "confirmed"
+    );
+
+    if (confirmation.value.err) {
+      throw new Error(
+        `Transaction failed: ${JSON.stringify(confirmation.value.err)}`
+      );
     }
+
+    console.log(`[transferNFT] Transaction confirmed successfully`);
 
     return res.status(200).json({
       success: true,
       message: "Transaction successfully relayed and confirmed.",
       signature: signature,
-      confirmationDetails: {
-        slot: confirmedTx.slot,
-        confirmations: confirmedTx.confirmations,
-      },
+      confirmationDetails: confirmation.value,
     });
   } catch (error) {
     console.error("[transferNFT] Transaction sending/confirmation error:", {
