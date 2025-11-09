@@ -5,6 +5,29 @@ import { Loader2, Send, Info, X, RefreshCw, Trash2 } from "lucide-react";
 import toast from "react-hot-toast";
 import GlowingCard from "../components/GlowingCard";
 import { useLocation } from "react-router-dom";
+import {
+  Connection,
+  Transaction,
+  PublicKey,
+  clusterApiUrl,
+  SystemProgram,
+} from "@solana/web3.js";
+import {
+  createTransferInstruction,
+  getAssociatedTokenAddress,
+  createAssociatedTokenAccountInstruction,
+  TOKEN_PROGRAM_ID,
+  ASSOCIATED_TOKEN_PROGRAM_ID,
+} from "@solana/spl-token";
+
+declare global {
+  interface Window {
+    solana?: {
+      signTransaction(transaction: Transaction): Promise<Transaction>;
+      signAllTransactions(transactions: Transaction[]): Promise<Transaction[]>;
+    };
+  }
+}
 
 interface NFT {
   mintAddress: string;
@@ -89,35 +112,132 @@ const NFTCollectionPage = () => {
   };
 
   const handleTransfer = async () => {
-    if (!selectedNFT || !transferAddress.trim()) {
+    if (!selectedNFT || !transferAddress.trim() || !publicKey || !connected) {
       toast.error("Please select an NFT and enter a recipient address");
       return;
     }
 
     try {
       setIsTransferring(true);
-      const response = await fetch(
-        "https://solanatokenmanager.onrender.com/api/transfer-nft",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            mintAddress: selectedNFT.mintAddress,
-            recipientPublicKey: transferAddress,
-          }),
-        }
+
+      // Create connection to Solana network
+      const connection = new Connection(clusterApiUrl("devnet"), {
+        commitment: "confirmed",
+        confirmTransactionInitialTimeout: 60000,
+      });
+
+      // Convert addresses to PublicKey objects
+      const mintPubkey = new PublicKey(selectedNFT.mintAddress);
+      const recipientPubkey = new PublicKey(transferAddress);
+
+      // Get associated token accounts for sender and recipient
+      const senderATA = await getAssociatedTokenAddress(
+        mintPubkey,
+        publicKey,
+        false,
+        TOKEN_PROGRAM_ID
       );
 
-      if (!response.ok) throw new Error("Transfer failed");
+      const recipientATA = await getAssociatedTokenAddress(
+        mintPubkey,
+        recipientPubkey,
+        false,
+        TOKEN_PROGRAM_ID
+      );
 
-      const data = await response.json();
-      toast.success(data.message || "NFT transferred successfully!");
-      setSelectedNFT(null);
-      setTransferAddress("");
-      fetchNFTs();
+      // Create a new transaction
+      const transaction = new Transaction();
+
+      // Check if recipient's ATA exists
+      const recipientATAInfo = await connection.getAccountInfo(recipientATA);
+
+      // Create ATA for recipient if it doesn't exist
+      if (!recipientATAInfo) {
+        console.log("Creating recipient ATA...");
+        const createAtaIx = createAssociatedTokenAccountInstruction(
+          publicKey,
+          recipientATA,
+          recipientPubkey,
+          mintPubkey,
+          TOKEN_PROGRAM_ID,
+          ASSOCIATED_TOKEN_PROGRAM_ID
+        );
+        transaction.add(createAtaIx);
+      }
+
+      // Add transfer instruction
+      const transferIx = createTransferInstruction(
+        senderATA,
+        recipientATA,
+        publicKey,
+        1,
+        [],
+        TOKEN_PROGRAM_ID
+      );
+      transaction.add(transferIx);
+
+      // Get the latest blockhash
+      const { blockhash } = await connection.getLatestBlockhash("finalized");
+      transaction.recentBlockhash = blockhash;
+      transaction.feePayer = publicKey;
+
+      try {
+        if (!window.solana) {
+          throw new Error("Solana wallet not found");
+        }
+
+        // Ensure transaction is legacy
+        transaction.serializeMessage();
+
+        console.log("Requesting transaction signature...");
+        const signedTx = await window.solana.signTransaction(transaction);
+        console.log("Transaction signed successfully");
+
+        // Verify signature
+        const isVerified = signedTx.verifySignatures();
+        if (!isVerified) {
+          throw new Error("Transaction signature verification failed");
+        }
+
+        const serializedTransaction = signedTx.serialize();
+        console.log("Transaction serialized successfully");
+
+        // Send to backend
+        const response = await fetch(
+          "https://solanatokenmanager.onrender.com/api/transfer-nft",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              serializedTransaction: serializedTransaction.toString("base64"),
+            }),
+          }
+        );
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.message || "Transfer failed");
+        }
+
+        const data = await response.json();
+        toast.success(data.message || "NFT transferred successfully!");
+        setSelectedNFT(null);
+        setTransferAddress("");
+        fetchNFTs();
+      } catch (error) {
+        console.error("Transfer error:", error);
+        if (error instanceof Error) {
+          toast.error(`Transfer failed: ${error.message}`);
+        } else {
+          toast.error("An unexpected error occurred during transfer");
+        }
+        throw error;
+      }
     } catch (error) {
-      toast.error("Failed to transfer NFT");
       console.error("Transfer error:", error);
+      toast.error(
+        error instanceof Error ? error.message : "Failed to transfer NFT"
+      );
     } finally {
       setIsTransferring(false);
     }
