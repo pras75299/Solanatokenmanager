@@ -3,7 +3,8 @@ import { useWallet } from "@solana/wallet-adapter-react";
 import { motion } from "framer-motion";
 import { Loader2, Droplet } from "lucide-react";
 import toast from "react-hot-toast";
-import GlowingCard from "../components/GlowingCard"; // Assuming this component exists
+import GlowingCard from "../components/GlowingCard";
+import { tokenService } from "../lib/api";
 
 const AirdropPage = () => {
   const { publicKey, connected } = useWallet();
@@ -15,35 +16,28 @@ const AirdropPage = () => {
       return;
     }
 
+    if (isAirdropping) {
+      return;
+    }
+
     setIsAirdropping(true);
-    const toastId = toast.loading("Requesting airdrop...");
 
     try {
-      const response = await fetch(
-        `https://solanatokenmanager.onrender.com/api/airdrop/${publicKey.toString()}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          // No body needed for this POST request as per the route definition
-        }
+      const { message } = await tokenService.requestAirdrop(
+        publicKey.toString()
       );
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || "Airdrop request failed");
-      }
-
-      toast.success(data.message || "Airdrop successful!", { id: toastId });
+      toast.success(message ?? "Airdrop successful!");
     } catch (error: any) {
-      toast.error(`Airdrop failed: ${error.message || "Unknown error"}`, {
-        id: toastId,
-      });
+      const description =
+        error?.message ||
+        error?.error ||
+        "Unknown error while requesting airdrop";
+      toast.error(`Airdrop failed: ${description}`);
       console.error("Airdrop error:", error);
     } finally {
       setIsAirdropping(false);
     }
-  }, [connected, publicKey]);
+  }, [connected, publicKey, isAirdropping]);
 
   return (
     <div className="max-w-md mx-auto p-6">
