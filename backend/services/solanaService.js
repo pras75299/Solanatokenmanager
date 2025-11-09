@@ -25,6 +25,44 @@ const { metaplex, payerKeypair } = require("./metaplex");
 const dotenv = require("dotenv");
 dotenv.config();
 
+const TOKEN_DECIMALS = 9;
+
+const convertAmountToRawUnits = (amount, decimals = TOKEN_DECIMALS) => {
+  if (typeof amount === "bigint") {
+    if (amount < 0n) {
+      throw new Error("Amount must be non-negative");
+    }
+    return amount;
+  }
+
+  if (typeof amount === "number") {
+    if (!Number.isFinite(amount)) {
+      throw new Error("Amount must be a finite number");
+    }
+    amount = amount.toString();
+  }
+
+  if (typeof amount !== "string") {
+    throw new Error("Amount must be a string, number, or bigint");
+  }
+
+  const normalized = amount.trim();
+  if (!/^\d+(\.\d+)?$/.test(normalized)) {
+    throw new Error("Amount must be a positive numeric string");
+  }
+
+  const [whole, fraction = ""] = normalized.split(".");
+
+  if (fraction.length > decimals) {
+    throw new Error(`Amount supports up to ${decimals} decimal places`);
+  }
+
+  const paddedFraction = `${fraction}${"0".repeat(decimals)}`.slice(0, decimals);
+  const raw = `${whole}${paddedFraction}`.replace(/^0+/, "") || "0";
+
+  return BigInt(raw);
+};
+
 // Connect to Solana devnet
 const connection = new Connection(clusterApiUrl("devnet"));
 
@@ -143,7 +181,7 @@ const mintToken = async (recipientPublicKey) => {
       mintPublicKey,
       recipientTokenAccount.address,
       payerKeypair,
-      1000 * 10 ** 9
+      convertAmountToRawUnits(1000)
     );
 
     console.log("Mint Transaction Signature:", signature);
@@ -187,7 +225,7 @@ const mintToken2022 = async (recipientPublicKey) => {
       mintPublicKey,
       recipientTokenAccount.address,
       payerKeypair,
-      1000 * 10 ** 9, // Amount to mint
+      convertAmountToRawUnits(1000),
       [],
       TOKEN_2022_PROGRAM_ID // Use Token-2022 program ID
     );
@@ -267,7 +305,7 @@ const transferTokens = async (
     );
 
     // Convert `amount` to BigInt and check balance
-    const amountBigInt = BigInt(amount) * BigInt(10 ** 9);
+    const amountBigInt = convertAmountToRawUnits(amount);
     if (senderBalance < amountBigInt) {
       const requiredAmount = amountBigInt - senderBalance;
       console.log(
@@ -381,7 +419,7 @@ const burnToken = async (mintAddress, ownerWallet, amount) => {
 
     const accountInfo = await getAccount(connection, ownerTokenAccount.address);
     const balance = accountInfo.amount;
-    const amountBigInt = BigInt(amount) * BigInt(10 ** 9);
+    const amountBigInt = convertAmountToRawUnits(amount);
 
     if (balance < amountBigInt) {
       throw new Error(
@@ -427,7 +465,7 @@ const delegateToken = async (
     );
 
     // Convert amount to BigInt with the appropriate decimals (assuming 9 decimals)
-    const amountBigInt = BigInt(amount) * BigInt(10 ** 9);
+    const amountBigInt = convertAmountToRawUnits(amount);
 
     // Approve delegation
     const transactionSignature = await approve(
@@ -566,4 +604,5 @@ module.exports = {
   delegateToken,
   closeTokenAccount,
   getNFTMetadata,
+  convertAmountToRawUnits,
 };
