@@ -5,6 +5,7 @@ import { Loader2, Send, Info, X, RefreshCw, Trash2 } from "lucide-react";
 import toast from "react-hot-toast";
 import GlowingCard from "../components/GlowingCard";
 import { useLocation } from "react-router-dom";
+import { getApiBaseUrl } from "../config/env";
 import {
   Connection,
   Transaction,
@@ -58,7 +59,7 @@ const NFTCollectionPage = () => {
       setLoading(true);
 
       const response = await fetch(
-        `https://solanatokenmanager.onrender.com/api/nfts?publicKey=${publicKey.toString()}`
+        `${getApiBaseUrl()}/nfts?publicKey=${publicKey.toString()}`
       );
 
       if (!response.ok) {
@@ -203,16 +204,13 @@ const NFTCollectionPage = () => {
         console.log("Transaction serialized successfully");
 
         // Send to backend
-        const response = await fetch(
-          "https://solanatokenmanager.onrender.com/api/transfer-nft",
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              serializedTransaction: serializedTransaction.toString("base64"),
-            }),
-          }
-        );
+        const response = await fetch(`${getApiBaseUrl()}/transfer-nft`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            serializedTransaction: serializedTransaction.toString("base64"),
+          }),
+        });
 
         if (!response.ok) {
           const errorData = await response.json();
@@ -246,7 +244,7 @@ const NFTCollectionPage = () => {
   const handleNFTRefresh = async (mintAddress: string) => {
     try {
       const response = await fetch(
-        `https://solanatokenmanager.onrender.com/api/refresh-metadata/${mintAddress}`
+        `${getApiBaseUrl()}/refresh-metadata/${mintAddress}`
       );
 
       if (!response.ok) {
@@ -272,12 +270,9 @@ const NFTCollectionPage = () => {
 
     const toastId = toast.loading("Deleting NFT record...");
     try {
-      const response = await fetch(
-        `https://solanatokenmanager.onrender.com/api/nft/${mintAddress}`,
-        {
-          method: "DELETE",
-        }
-      );
+      const response = await fetch(`${getApiBaseUrl()}/nft/${mintAddress}`, {
+        method: "DELETE",
+      });
 
       if (!response.ok) {
         const errorText = await response.text();

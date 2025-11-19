@@ -11,6 +11,7 @@ import {
 import toast from "react-hot-toast";
 import GlowingCard from "../components/GlowingCard";
 import { useNavigate } from "react-router-dom";
+import { getApiBaseUrl } from "../config/env";
 
 interface FormData {
   name: string;
@@ -93,13 +94,10 @@ const MintNFTPage: React.FC = () => {
       imageFormData.append("file", cleanFile);
       imageFormData.append("wallet", publicKey?.toString() || "unknown");
 
-      const uploadResponse = await fetch(
-        "https://solanatokenmanager.onrender.com/api/upload-image",
-        {
-          method: "POST",
-          body: imageFormData,
-        }
-      );
+      const uploadResponse = await fetch(`${getApiBaseUrl()}/upload-image`, {
+        method: "POST",
+        body: imageFormData,
+      });
 
       if (!uploadResponse.ok) {
         const errorText = await uploadResponse.text();
@@ -265,19 +263,16 @@ const MintNFTPage: React.FC = () => {
 
       toast.loading("Minting NFT...", { id: toastId });
 
-      const mintResponse = await fetch(
-        "https://solanatokenmanager.onrender.com/api/mint-nft",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            recipientPublicKey: publicKey.toString(),
-            metadata: metadata,
-          }),
-        }
-      );
+      const mintResponse = await fetch(`${getApiBaseUrl()}/mint-nft`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          recipientPublicKey: publicKey.toString(),
+          metadata: metadata,
+        }),
+      });
 
       if (!mintResponse.ok) {
         const mintResponseText = await mintResponse.text();

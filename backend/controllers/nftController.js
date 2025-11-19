@@ -4,7 +4,8 @@ const loadKeypair = require("../importKey");
 const multer = require("multer");
 const path = require("path");
 const cloudinary = require("cloudinary").v2;
-const fs = require("fs").promises;
+const fs = require("fs");
+const fsp = fs.promises;
 const dotenv = require("dotenv");
 const {
   Connection,
@@ -48,6 +49,15 @@ const getCloudinaryOptions = (publicKey, customOptions = {}) => ({
   ...customOptions,
 });
 
+const UPLOAD_DIR = path.resolve("./tmp/uploads");
+
+const ensureUploadDirectory = () => {
+  if (!fs.existsSync(UPLOAD_DIR)) {
+    fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+  }
+  return UPLOAD_DIR;
+};
+
 // Configure Cloudinary - Removed the try/catch as server.js handles initial validation
 // Ensure validateCloudinaryConfig is defined before this if needed elsewhere,
 // but server.js handles the main startup check.
@@ -59,8 +69,16 @@ cloudinary.config({
 });
 
 // Configure multer for temporary file storage
+ensureUploadDirectory();
+
 const storage = multer.diskStorage({
-  destination: "./tmp/uploads/",
+  destination: (_req, _file, cb) => {
+    try {
+      cb(null, ensureUploadDirectory());
+    } catch (error) {
+      cb(error);
+    }
+  },
   filename: (req, file, cb) => {
     const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
     const extension = path.extname(file.originalname);
@@ -142,7 +160,8 @@ exports.mintNFT = async (req, res) => {
     );
   }
 
-  let finalImageUri = metadata.uri; // Define here to be accessible in the final catch
+  const originalMetadataUri = metadata.uri;
+  let finalImageUri = originalMetadataUri; // Define here to be accessible in the final catch
 
   try {
     // --- Upload Image to Cloudinary if necessary ---
@@ -154,15 +173,15 @@ exports.mintNFT = async (req, res) => {
           const base64Data = finalImageUri.split(",")[1];
           const buffer = Buffer.from(base64Data, "base64");
           // Ensure tmp directory exists
-          await fs.mkdir("./tmp/uploads", { recursive: true });
-          const tempPath = `./tmp/uploads/${Date.now()}-image.png`; // Define path after directory creation
-          await fs.writeFile(tempPath, buffer);
+          const uploadDir = ensureUploadDirectory();
+          const tempPath = path.join(uploadDir, `${Date.now()}-image.png`);
+          await fsp.writeFile(tempPath, buffer);
 
           uploadResult = await cloudinary.uploader.upload(
             tempPath,
             getCloudinaryOptions(recipientPublicKey)
           );
-          await fs
+          await fsp
             .unlink(tempPath)
             .catch((err) =>
               console.error("Failed to delete temp base64 file:", err)
@@ -203,7 +222,7 @@ exports.mintNFT = async (req, res) => {
     // --- Prepare Final Metadata ---
     const finalMetadata = {
       ...metadata,
-      uri: finalImageUri, // Ensure final Cloudinary URI
+      uri: originalMetadataUri,
       image: finalImageUri, // Ensure final Cloudinary image
       properties: {
         ...(metadata.properties || {}),
@@ -531,7 +550,7 @@ exports.uploadImage = async (req, res) => {
       // Validate wallet address
       const wallet = req.body.wallet;
       if (!wallet) {
-        await fs
+        await fsp
           .unlink(tempFilePath)
           .catch((unlinkErr) =>
             console.error(
@@ -591,7 +610,7 @@ exports.uploadImage = async (req, res) => {
       } finally {
         // --- Cleanup Temporary File ---
         // Always attempt to delete the temp file
-        await fs
+        await fsp
           .unlink(tempFilePath)
           .catch((unlinkErr) =>
             console.error(
