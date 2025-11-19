@@ -22,6 +22,7 @@ const {
   TOKEN_2022_PROGRAM_ID,
 } = require("@solana/spl-token");
 const { metaplex, payerKeypair } = require("./metaplex");
+const { InsufficientTokenBalanceError } = require("./errors");
 const dotenv = require("dotenv");
 dotenv.config();
 
@@ -57,7 +58,10 @@ const convertAmountToRawUnits = (amount, decimals = TOKEN_DECIMALS) => {
     throw new Error(`Amount supports up to ${decimals} decimal places`);
   }
 
-  const paddedFraction = `${fraction}${"0".repeat(decimals)}`.slice(0, decimals);
+  const paddedFraction = `${fraction}${"0".repeat(decimals)}`.slice(
+    0,
+    decimals
+  );
   const raw = `${whole}${paddedFraction}`.replace(/^0+/, "") || "0";
 
   return BigInt(raw);
@@ -147,14 +151,56 @@ const getBalance = async (publicKey) => {
 // Function to airdrop SOL
 const airdropSol = async (publicKey) => {
   try {
+    const publicKeyObj = new PublicKey(publicKey);
+    console.log(`[Airdrop] Requesting airdrop for: ${publicKeyObj.toString()}`);
+    console.log(`[Airdrop] Network: devnet, RPC: ${connection.rpcEndpoint}`);
+
+    // Request airdrop
     const airdropSignature = await connection.requestAirdrop(
-      new PublicKey(publicKey),
+      publicKeyObj,
       2 * LAMPORTS_PER_SOL
     );
-    await connection.confirmTransaction(airdropSignature);
+
+    console.log(`[Airdrop] Transaction signature: ${airdropSignature}`);
+
+    // Wait for confirmation - use the latest blockhash approach
+    const latestBlockhash = await connection.getLatestBlockhash("confirmed");
+
+    // Confirm transaction using the new API format
+    const confirmation = await connection.confirmTransaction(
+      {
+        signature: airdropSignature,
+        blockhash: latestBlockhash.blockhash,
+        lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+      },
+      "confirmed"
+    );
+
+    // Check if transaction failed
+    if (confirmation.value && confirmation.value.err) {
+      const errorDetails = JSON.stringify(confirmation.value.err);
+      console.error(`[Airdrop] Transaction failed with error: ${errorDetails}`);
+      throw new Error(`Airdrop transaction failed: ${errorDetails}`);
+    }
+
+    console.log(`[Airdrop] Transaction confirmed: ${airdropSignature}`);
     return "Airdrop successful!";
   } catch (error) {
-    throw new Error(`Airdrop failed: ${error.message}`);
+    console.error(`[Airdrop] Error details:`, {
+      message: error.message,
+      stack: error.stack,
+      name: error.name,
+      code: error.code,
+      fullError: error,
+    });
+
+    // Return the original error message without double-wrapping
+    if (error.message && !error.message.includes("Airdrop failed:")) {
+      throw error;
+    }
+
+    // If already wrapped, throw as-is
+    throw error;
   }
 };
 
@@ -246,7 +292,27 @@ const airdropSolIfNeeded = async (
   const balance = await connection.getBalance(publicKey);
   if (balance < minBalance) {
     const signature = await connection.requestAirdrop(publicKey, minBalance);
-    await connection.confirmTransaction(signature);
+
+    // Get latest blockhash for confirmation
+    const latestBlockhash = await connection.getLatestBlockhash("confirmed");
+
+    // Confirm transaction using the new API format
+    const confirmation = await connection.confirmTransaction(
+      {
+        signature,
+        blockhash: latestBlockhash.blockhash,
+        lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+      },
+      "confirmed"
+    );
+
+    if (confirmation.value.err) {
+      console.error("Airdrop failed:", confirmation.value.err);
+      throw new Error(
+        `Airdrop failed: ${JSON.stringify(confirmation.value.err)}`
+      );
+    }
+
     console.log("Airdropped SOL to payer account for transaction fees.");
   }
 };
@@ -297,7 +363,9 @@ const transferTokens = async (
     );
 
     // Check sender's token account balance
-    let senderBalance = await getTokenAccountBalance(fromTokenAccount.address);
+    const senderBalance = await getTokenAccountBalance(
+      fromTokenAccount.address
+    );
     console.log(
       "Initial Sender Token Account Balance:",
       senderBalance,
@@ -307,38 +375,10 @@ const transferTokens = async (
     // Convert `amount` to BigInt and check balance
     const amountBigInt = convertAmountToRawUnits(amount);
     if (senderBalance < amountBigInt) {
-      const requiredAmount = amountBigInt - senderBalance;
-      console.log(
-        `Insufficient token balance: ${senderBalance} available, ${amountBigInt} required. Minting additional tokens...`
-      );
-
-      // Mint only the required additional tokens
-      await mintTo(
-        connection,
-        payerKeypair,
-        mintPublicKey,
-        fromTokenAccount.address,
-        payerKeypair,
-        requiredAmount,
-        [],
-        programId
-      );
-
-      console.log("Minted additional tokens to sender's account.");
-
-      // Re-check balance after minting
-      senderBalance = await getTokenAccountBalance(fromTokenAccount.address);
-      console.log(
-        "Updated Sender Token Account Balance:",
-        senderBalance,
-        "tokens"
-      );
-
-      if (senderBalance < amountBigInt) {
-        throw new Error(
-          `Minting failed: still insufficient balance after minting.`
-        );
-      }
+      throw new InsufficientTokenBalanceError({
+        required: amountBigInt,
+        available: senderBalance,
+      });
     }
 
     // Create the transfer instruction with the correct program ID
@@ -364,6 +404,9 @@ const transferTokens = async (
     return `Transfer successful, transaction signature: ${signature}`;
   } catch (error) {
     console.error("Detailed Transfer Error:", error.message);
+    if (error instanceof InsufficientTokenBalanceError) {
+      throw error;
+    }
     throw new Error(`Token transfer failed: ${error.message}`);
   }
 };
