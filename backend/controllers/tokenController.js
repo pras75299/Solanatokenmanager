@@ -40,13 +40,16 @@ exports.mintToken = async (req, res) => {
   }
 
   try {
+    console.log(`[MintToken Controller] Minting ${tokenStandard} for: ${recipientPublicKey}`);
     const result =
       tokenStandard === "Token-2022"
         ? await solanaService.mintToken2022(recipientPublicKey)
         : await solanaService.mintToken(recipientPublicKey);
 
+    console.log(`[MintToken Controller] Mint successful: ${result}`);
     return res.status(200).json({ success: true, message: result });
   } catch (error) {
+    console.error(`[MintToken Controller] Mint failed:`, error);
     return res.status(500).json({
       success: false,
       message: "Token minting failed",
@@ -89,10 +92,15 @@ exports.transferTokens = async (req, res) => {
     );
     res.status(200).json({ success: true, message: transferResponse });
   } catch (error) {
-    res.status(500).json({
+    const statusCode = Number.isInteger(error.statusCode)
+      ? error.statusCode
+      : 500;
+    res.status(statusCode).json({
       success: false,
-      message: "Token transfer failed",
+      message:
+        statusCode === 500 ? "Token transfer failed" : error.message,
       error: error.message,
+      details: error.details,
     });
   }
 };

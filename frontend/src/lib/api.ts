@@ -74,9 +74,12 @@ const extractErrorPayload = (error: unknown): ApiError => {
 export const tokenService = {
   async mintToken<T>(data: T) {
     try {
+      console.log("[API] Mint token request:", data);
       const response = await api.post("/mint-token", data);
+      console.log("[API] Mint token response:", response.data);
       return response.data;
     } catch (error) {
+      console.error("[API] Mint token error:", error);
       throw extractErrorPayload(error);
     }
   },

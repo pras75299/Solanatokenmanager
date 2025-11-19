@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
+import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
   Loader2,
@@ -11,49 +12,24 @@ import {
 } from "lucide-react";
 import toast from "react-hot-toast";
 import GlowingCard from "../components/GlowingCard";
-import {
-  Connection,
-  PublicKey,
-  Transaction,
-  SystemProgram,
-  Keypair,
-  sendAndConfirmTransaction,
-} from "@solana/web3.js";
-import {
-  TOKEN_PROGRAM_ID,
-  createInitializeMintInstruction,
-  getMinimumBalanceForRentExemptMint,
-  MINT_SIZE,
-  createMint,
-  getAssociatedTokenAddress,
-  createAssociatedTokenAccountInstruction,
-  createMintToInstruction,
-} from "@solana/spl-token";
+import { tokenService } from "../lib/api";
 
 interface TokenFormData {
-  name: string;
-  symbol: string;
-  decimals: number;
-  totalSupply: number;
+  tokenStandard: "Token" | "Token-2022";
 }
 
-interface CreatedToken {
-  name: string;
-  symbol: string;
-  decimals: number;
-  totalSupply: number;
-  mintAddress: string;
+interface MintResult {
+  message: string;
+  mintAddress?: string;
 }
 
 const MintTokenPage: React.FC = () => {
-  const { publicKey, connected, signTransaction } = useWallet();
+  const { publicKey, connected } = useWallet();
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
-  const [createdToken, setCreatedToken] = useState<CreatedToken | null>(null);
+  const [mintResult, setMintResult] = useState<MintResult | null>(null);
   const [formData, setFormData] = useState<TokenFormData>({
-    name: "",
-    symbol: "",
-    decimals: 9,
-    totalSupply: 1000000,
+    tokenStandard: "Token",
   });
 
   const copyToClipboard = async (text: string) => {
@@ -67,128 +43,63 @@ const MintTokenPage: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!connected || !publicKey || !signTransaction) {
+    if (!connected || !publicKey) {
       toast.error("Please connect your wallet first");
-      return;
-    }
-
-    if (!formData.name || !formData.symbol) {
-      toast.error("Please fill in all required fields");
       return;
     }
 
     try {
       setLoading(true);
+      setMintResult(null);
 
-      // Connect to Solana devnet
-      const connection = new Connection(
-        "https://api.devnet.solana.com",
-        "confirmed"
-      );
-
-      // Create a new mint account
-      const mintKeypair = Keypair.generate();
-      const lamports = await getMinimumBalanceForRentExemptMint(connection);
-
-      // Create the mint account
-      const createMintAccountInstruction = SystemProgram.createAccount({
-        fromPubkey: publicKey,
-        newAccountPubkey: mintKeypair.publicKey,
-        space: MINT_SIZE,
-        lamports,
-        programId: TOKEN_PROGRAM_ID,
+      console.log("[MintTokenPage] Requesting token mint...");
+      const response = await tokenService.mintToken({
+        recipientPublicKey: publicKey.toString(),
+        tokenStandard: formData.tokenStandard,
       });
 
-      // Initialize the mint
-      const initializeMintInstruction = createInitializeMintInstruction(
-        mintKeypair.publicKey,
-        formData.decimals,
-        publicKey,
-        publicKey,
-        TOKEN_PROGRAM_ID
-      );
+      console.log("[MintTokenPage] Mint response:", response);
 
-      // Get the token account of the wallet address
-      const associatedTokenAccount = await getAssociatedTokenAddress(
-        mintKeypair.publicKey,
-        publicKey
-      );
-
-      // Create the associated token account if it doesn't exist
-      const createAccountInstruction = createAssociatedTokenAccountInstruction(
-        publicKey,
-        associatedTokenAccount,
-        publicKey,
-        mintKeypair.publicKey
-      );
-
-      // Mint tokens to the associated token account
-      const mintToInstruction = createMintToInstruction(
-        mintKeypair.publicKey,
-        associatedTokenAccount,
-        publicKey,
-        formData.totalSupply * Math.pow(10, formData.decimals)
-      );
-
-      // Create and send transaction
-      const transaction = new Transaction().add(
-        createMintAccountInstruction,
-        initializeMintInstruction,
-        createAccountInstruction,
-        mintToInstruction
-      );
-
-      const { blockhash } = await connection.getLatestBlockhash();
-      transaction.recentBlockhash = blockhash;
-      transaction.feePayer = publicKey;
-      transaction.sign(mintKeypair);
-
-      try {
-        // Sign and send the transaction
-        const signedTransaction = await signTransaction(transaction);
-        const txid = await connection.sendRawTransaction(
-          signedTransaction.serialize()
-        );
-
-        // Wait for transaction confirmation
-        const confirmation = await connection.confirmTransaction(
-          txid,
-          "confirmed"
-        );
-
-        if (confirmation.value.err) {
-          throw new Error("Transaction failed to confirm");
+      // Check if response has success property
+      if (response && response.success === true) {
+        setMintResult({
+          message: response.message || "Tokens minted successfully!",
+        });
+        toast.success(response.message || "Tokens minted successfully!");
+        
+        // Navigate to tokens page after a short delay to allow blockchain to update
+        setTimeout(() => {
+          navigate("/tokens", { 
+            state: { fromMintPage: true, refreshTimestamp: Date.now() } 
+          });
+        }, 2000);
+      } else if (response && response.success === false) {
+        // Explicit failure case
+        const errorMsg = response.message || response.error || "Failed to mint tokens";
+        console.error("[MintTokenPage] Mint failed:", errorMsg);
+        toast.error(errorMsg);
+      } else {
+        // Unexpected response format
+        console.warn("[MintTokenPage] Unexpected response format:", response);
+        // Assume success if we got a message
+        if (response?.message) {
+          setMintResult({
+            message: response.message,
+          });
+          toast.success(response.message);
+        } else {
+          throw new Error("Unexpected response format from server");
         }
-
-        // Set the created token details
-        setCreatedToken({
-          name: formData.name,
-          symbol: formData.symbol,
-          decimals: formData.decimals,
-          totalSupply: formData.totalSupply,
-          mintAddress: mintKeypair.publicKey.toString(),
-        });
-
-        toast.success("Token created successfully!");
-
-        // Reset form
-        setFormData({
-          name: "",
-          symbol: "",
-          decimals: 9,
-          totalSupply: 1000000,
-        });
-      } catch (txError) {
-        console.error("Transaction error:", txError);
-        throw new Error(
-          "Failed to create token. Please check your wallet's SOL balance and try again."
-        );
       }
-    } catch (error) {
-      console.error("Token creation error:", error);
-      toast.error(
-        error instanceof Error ? error.message : "Failed to create token"
-      );
+    } catch (error: any) {
+      console.error("[MintTokenPage] Token minting error:", error);
+      const errorMessage =
+        error?.response?.data?.message ||
+        error?.response?.data?.error ||
+        error?.message ||
+        error?.error ||
+        "Failed to mint tokens";
+      toast.error(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -197,72 +108,31 @@ const MintTokenPage: React.FC = () => {
   return (
     <div className="max-w-2xl mx-auto p-6">
       <GlowingCard>
-        {createdToken ? (
+        {mintResult ? (
           <div className="space-y-6">
             <div className="flex items-center justify-between">
               <h2 className="text-2xl font-bold text-white">
-                Token Created Successfully!
+                Tokens Minted Successfully!
               </h2>
               <button
-                onClick={() => setCreatedToken(null)}
+                onClick={() => setMintResult(null)}
                 className="text-gray-400 hover:text-white transition-colors"
               >
-                Create Another Token
+                Mint More Tokens
               </button>
             </div>
 
             <div className="bg-[#2A303C] rounded-lg p-6 space-y-4">
               <div>
-                <label className="text-gray-400 text-sm">Token Name</label>
-                <p className="text-white font-medium">{createdToken.name}</p>
+                <label className="text-gray-400 text-sm">Result</label>
+                <p className="text-white font-medium">{mintResult.message}</p>
               </div>
 
               <div>
-                <label className="text-gray-400 text-sm">Token Symbol</label>
-                <p className="text-white font-medium">{createdToken.symbol}</p>
-              </div>
-
-              <div>
-                <label className="text-gray-400 text-sm">Decimals</label>
+                <label className="text-gray-400 text-sm">Token Standard</label>
                 <p className="text-white font-medium">
-                  {createdToken.decimals}
+                  {formData.tokenStandard}
                 </p>
-              </div>
-
-              <div>
-                <label className="text-gray-400 text-sm">Total Supply</label>
-                <p className="text-white font-medium">
-                  {createdToken.totalSupply.toLocaleString()}{" "}
-                  {createdToken.symbol}
-                </p>
-              </div>
-
-              <div>
-                <label className="text-gray-400 text-sm">Mint Address</label>
-                <div className="flex items-center gap-2 mt-1">
-                  <code className="text-purple-400 bg-[#1F242D] px-3 py-1 rounded text-sm flex-1 overflow-x-auto">
-                    {createdToken.mintAddress}
-                  </code>
-                  <button
-                    onClick={() => copyToClipboard(createdToken.mintAddress)}
-                    className="p-2 hover:bg-[#1F242D] rounded-lg transition-colors"
-                    title="Copy to clipboard"
-                  >
-                    <Copy className="w-4 h-4 text-gray-400" />
-                  </button>
-                </div>
-              </div>
-
-              <div className="pt-4">
-                <a
-                  href={`https://explorer.solana.com/address/${createdToken.mintAddress}?cluster=devnet`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-2 text-purple-400 hover:text-purple-300 transition-colors"
-                >
-                  <ExternalLink className="w-4 h-4" />
-                  View on Solana Explorer
-                </a>
               </div>
             </div>
 
@@ -271,11 +141,12 @@ const MintTokenPage: React.FC = () => {
                 <CheckCircle2 className="w-5 h-5 text-green-400 mt-1 flex-shrink-0" />
                 <div className="space-y-1">
                   <p className="text-green-300">
-                    Your token has been created successfully on the Solana
-                    devnet.
+                    Tokens have been minted successfully to your connected
+                    wallet.
                   </p>
                   <p className="text-green-400/80 text-sm">
-                    The initial supply has been minted to your connected wallet.
+                    The backend uses a shared mint address. 1000 tokens were
+                    minted to your account.
                   </p>
                 </div>
               </div>
@@ -283,21 +154,18 @@ const MintTokenPage: React.FC = () => {
           </div>
         ) : (
           <>
-            <h1 className="text-3xl font-bold text-white mb-6">
-              Create New Token
-            </h1>
+            <h1 className="text-3xl font-bold text-white mb-6">Mint Tokens</h1>
 
             <div className="bg-[#2A303C] rounded-lg p-4 mb-6">
               <div className="flex items-start gap-3">
                 <Info className="w-5 h-5 text-gray-400 mt-1 flex-shrink-0" />
                 <div className="space-y-2">
                   <p className="text-gray-300">
-                    Create your fungible token on the Solana blockchain. Specify
-                    the token name, symbol, decimals, and total supply.
+                    Mint tokens from the backend-managed mint address. Tokens
+                    will be minted to your connected wallet.
                   </p>
                   <p className="text-gray-400 text-sm">
-                    Note: Tokens will be created on the Solana devnet. Make sure
-                    you have enough SOL in your devnet wallet.
+                    Note: The backend uses a shared mint address (all tokens are from the same token type). 1000 tokens will be minted to your account.
                   </p>
                 </div>
               </div>
@@ -305,85 +173,23 @@ const MintTokenPage: React.FC = () => {
 
             <form onSubmit={handleSubmit} className="space-y-6">
               <div>
-                <label className="block text-gray-300 mb-2">Token Name *</label>
-                <input
-                  type="text"
-                  value={formData.name}
-                  onChange={(e) =>
-                    setFormData({ ...formData, name: e.target.value })
-                  }
-                  className="w-full bg-[#2A303C] border border-gray-700 rounded-lg px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 transition-colors"
-                  placeholder="Enter token name"
-                  disabled={loading}
-                />
-              </div>
-
-              <div>
                 <label className="block text-gray-300 mb-2">
-                  Token Symbol *
+                  Token Standard *
                 </label>
-                <input
-                  type="text"
-                  value={formData.symbol}
+                <select
+                  value={formData.tokenStandard}
                   onChange={(e) =>
                     setFormData({
                       ...formData,
-                      symbol: e.target.value.toUpperCase(),
+                      tokenStandard: e.target.value as "Token" | "Token-2022",
                     })
                   }
-                  className="w-full bg-[#2A303C] border border-gray-700 rounded-lg px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 transition-colors"
-                  placeholder="Enter token symbol (e.g., SOL)"
+                  className="w-full bg-[#2A303C] border border-gray-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-purple-500 transition-colors"
                   disabled={loading}
-                  maxLength={5}
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-gray-300 mb-2">
-                    Decimals
-                    <span className="text-gray-500 text-sm ml-1">(0-9)</span>
-                  </label>
-                  <input
-                    type="number"
-                    value={formData.decimals}
-                    onChange={(e) =>
-                      setFormData({
-                        ...formData,
-                        decimals: Math.max(
-                          0,
-                          Math.min(9, parseInt(e.target.value))
-                        ),
-                      })
-                    }
-                    min="0"
-                    max="9"
-                    className="w-full bg-[#2A303C] border border-gray-700 rounded-lg px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 transition-colors"
-                    placeholder="Enter decimals"
-                    disabled={loading}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-gray-300 mb-2">
-                    Total Supply
-                    <span className="text-gray-500 text-sm ml-1">(min: 1)</span>
-                  </label>
-                  <input
-                    type="number"
-                    value={formData.totalSupply}
-                    onChange={(e) =>
-                      setFormData({
-                        ...formData,
-                        totalSupply: Math.max(1, parseInt(e.target.value) || 0),
-                      })
-                    }
-                    min="1"
-                    className="w-full bg-[#2A303C] border border-gray-700 rounded-lg px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 transition-colors"
-                    placeholder="Enter total supply"
-                    disabled={loading}
-                  />
-                </div>
+                >
+                  <option value="Token">Token (SPL Token)</option>
+                  <option value="Token-2022">Token-2022</option>
+                </select>
               </div>
 
               <motion.button
@@ -398,19 +204,19 @@ const MintTokenPage: React.FC = () => {
                 {loading ? (
                   <>
                     <Loader2 className="w-5 h-5 animate-spin" />
-                    Creating Token...
+                    Minting Tokens...
                   </>
                 ) : (
                   <>
                     <Coins className="w-5 h-5" />
-                    Create Token
+                    Mint Tokens
                   </>
                 )}
               </motion.button>
 
               {!connected && (
                 <p className="text-center text-sm text-gray-400 mt-2">
-                  Please connect your wallet to create tokens
+                  Please connect your wallet to mint tokens
                 </p>
               )}
             </form>
