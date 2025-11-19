@@ -10,19 +10,20 @@ import {
   Flame,
   X,
   Trash2,
+  Send,
 } from "lucide-react";
 import toast from "react-hot-toast";
 import GlowingCard from "../components/GlowingCard";
 import { useLocation } from "react-router-dom";
-import { Connection, PublicKey, Transaction } from "@solana/web3.js";
+import { Connection, PublicKey } from "@solana/web3.js";
 import {
   TOKEN_PROGRAM_ID,
+  TOKEN_2022_PROGRAM_ID,
   getAccount,
   getAssociatedTokenAddress,
   getMint,
-  createBurnInstruction,
-  createCloseAccountInstruction,
 } from "@solana/spl-token";
+import { tokenService } from "../lib/api";
 
 interface TokenInfo {
   mintAddress: string;
@@ -36,6 +37,12 @@ interface DeleteModalProps {
   token: TokenInfo;
   onClose: () => void;
   onConfirm: () => Promise<void>;
+}
+
+interface TransferModalProps {
+  token: TokenInfo;
+  onClose: () => void;
+  onConfirm: (toWallet: string, amount: string, tokenStandard: string) => Promise<void>;
 }
 
 const DeleteModal: React.FC<DeleteModalProps> = ({
@@ -106,12 +113,145 @@ const DeleteModal: React.FC<DeleteModalProps> = ({
   );
 };
 
+const TransferModal: React.FC<TransferModalProps> = ({
+  token,
+  onClose,
+  onConfirm,
+}) => {
+  const [loading, setLoading] = useState(false);
+  const [toWallet, setToWallet] = useState("");
+  const [amount, setAmount] = useState("");
+  const [tokenStandard, setTokenStandard] = useState("Token");
+
+  const handleTransfer = async () => {
+    if (!toWallet.trim() || !amount.trim()) {
+      toast.error("Please fill in all fields");
+      return;
+    }
+
+    const amountNum = parseFloat(amount);
+    if (isNaN(amountNum) || amountNum <= 0) {
+      toast.error("Please enter a valid positive amount");
+      return;
+    }
+
+    if (amountNum > token.balance) {
+      toast.error("Amount exceeds available balance");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await onConfirm(toWallet, amount, tokenStandard);
+    } catch (error) {
+      console.error("Error in transfer confirmation:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div className="bg-[#1F242D] rounded-lg p-6 max-w-md w-full mx-4">
+        <div className="flex justify-between items-center mb-4">
+          <h3 className="text-xl font-semibold text-white">Transfer Tokens</h3>
+          <button
+            onClick={onClose}
+            className="p-1 hover:bg-[#2A303C] rounded-full transition-colors"
+          >
+            <X className="w-5 h-5 text-gray-400" />
+          </button>
+        </div>
+
+        <div className="bg-[#2A303C] rounded-lg p-4 mb-6 space-y-4">
+          <div>
+            <label className="text-gray-400 text-sm">Token</label>
+            <p className="text-white font-medium">{token.name}</p>
+            <p className="text-gray-400 text-sm">
+              Balance: {token.balance.toLocaleString()}
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-gray-300 mb-2 text-sm">
+              Recipient Address *
+            </label>
+            <input
+              type="text"
+              value={toWallet}
+              onChange={(e) => setToWallet(e.target.value)}
+              className="w-full bg-[#1F242D] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-purple-500"
+              placeholder="Enter recipient address"
+              disabled={loading}
+            />
+          </div>
+
+          <div>
+            <label className="block text-gray-300 mb-2 text-sm">Amount *</label>
+            <input
+              type="text"
+              value={amount}
+              onChange={(e) => {
+                const value = e.target.value.replace(/[^0-9.]/g, "");
+                setAmount(value);
+              }}
+              className="w-full bg-[#1F242D] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-purple-500"
+              placeholder="Enter amount"
+              disabled={loading}
+            />
+          </div>
+
+          <div>
+            <label className="block text-gray-300 mb-2 text-sm">
+              Token Standard
+            </label>
+            <select
+              value={tokenStandard}
+              onChange={(e) => setTokenStandard(e.target.value)}
+              className="w-full bg-[#1F242D] border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-purple-500"
+              disabled={loading}
+            >
+              <option value="Token">Token (SPL Token)</option>
+              <option value="Token-2022">Token-2022</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="flex gap-4">
+          <button
+            onClick={onClose}
+            className="flex-1 px-4 py-2 bg-[#2A303C] text-gray-300 rounded-lg hover:bg-[#353D4B] transition-colors"
+            disabled={loading}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleTransfer}
+            disabled={loading}
+            className="flex-1 flex items-center justify-center gap-2 bg-purple-500 text-white py-2 rounded-lg transition-all duration-200 hover:bg-purple-600"
+          >
+            {loading ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Transferring...
+              </>
+            ) : (
+              "Transfer"
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const TokensPage: React.FC = () => {
-  const { publicKey, connected, signTransaction } = useWallet();
+  const { publicKey, connected } = useWallet();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [tokens, setTokens] = useState<TokenInfo[]>([]);
   const [tokenToDelete, setTokenToDelete] = useState<TokenInfo | null>(null);
+  const [tokenToTransfer, setTokenToTransfer] = useState<TokenInfo | null>(null);
   const location = useLocation();
 
   const copyToClipboard = async (text: string) => {
@@ -132,54 +272,70 @@ const TokensPage: React.FC = () => {
 
     try {
       setLoading(true);
+      // Use confirmed commitment for faster updates (finalized can take longer)
       const connection = new Connection(
         "https://api.devnet.solana.com",
         "confirmed"
       );
 
-      // console.log("Fetching token accounts for wallet:", publicKey.toString());
+      console.log("[TokensPage] Fetching token accounts for wallet:", publicKey.toString());
 
-      // Get all token accounts for the wallet
-      const tokenAccounts = await connection.getParsedTokenAccountsByOwner(
-        publicKey,
-        { programId: TOKEN_PROGRAM_ID }
-      );
+      // Get all token accounts for both Token and Token-2022 programs
+      const [tokenAccounts, token2022Accounts] = await Promise.all([
+        connection.getParsedTokenAccountsByOwner(
+          publicKey,
+          { programId: TOKEN_PROGRAM_ID }
+        ),
+        connection.getParsedTokenAccountsByOwner(
+          publicKey,
+          { programId: TOKEN_2022_PROGRAM_ID }
+        ),
+      ]);
 
-      // console.log("Found token accounts:", tokenAccounts.value.length);
+      // Combine both token account lists
+      const allTokenAccounts = [
+        ...tokenAccounts.value,
+        ...token2022Accounts.value,
+      ];
+
+      console.log("[TokensPage] Found token accounts:", {
+        standard: tokenAccounts.value.length,
+        token2022: token2022Accounts.value.length,
+        total: allTokenAccounts.length,
+      });
 
       // Fetch details for each token
-      const tokenPromises = tokenAccounts.value.map(async (tokenAccount) => {
+      const tokenPromises = allTokenAccounts.map(async (tokenAccount) => {
         const parsedInfo = tokenAccount.account.data.parsed.info;
         const mintAddress = parsedInfo.mint;
+        // Determine which program ID this token uses
+        const programId = tokenAccount.account.owner.equals(TOKEN_2022_PROGRAM_ID)
+          ? TOKEN_2022_PROGRAM_ID
+          : TOKEN_PROGRAM_ID;
 
         try {
-          // Get mint info first
+          // Get mint info with the correct program ID
           const mintInfo = await getMint(
             connection,
-            new PublicKey(mintAddress)
-          );
-
-          // Get fresh token account data to ensure accurate balance
-          const tokenAccountAddress = await getAssociatedTokenAddress(
             new PublicKey(mintAddress),
-            publicKey
+            "confirmed",
+            programId
           );
 
-          const freshTokenAccount = await getAccount(
-            connection,
-            tokenAccountAddress,
-            "finalized" // Use finalized commitment for accurate balance
-          );
+          // Use the parsed balance from getParsedTokenAccountsByOwner
+          // This is more reliable and faster than refetching
+          const tokenAmount = parsedInfo.tokenAmount;
+          const actualBalance = tokenAmount?.uiAmount ?? 0;
+          const rawBalance = tokenAmount?.amount 
+            ? BigInt(tokenAmount.amount)
+            : BigInt(Math.floor(actualBalance * Math.pow(10, mintInfo.decimals)));
 
-          // Calculate actual balance considering decimals
-          const rawBalance = Number(freshTokenAccount.amount);
-          const actualBalance = rawBalance / Math.pow(10, mintInfo.decimals);
-
-          // console.log(`Token ${mintAddress} balance:`, {
-          //   raw: rawBalance,
-          //   actual: actualBalance,
-          //   decimals: mintInfo.decimals,
-          // });
+          console.log(`[TokensPage] Token ${mintAddress.slice(0, 8)}... balance:`, {
+            raw: rawBalance.toString(),
+            actual: actualBalance,
+            decimals: mintInfo.decimals,
+            programId: programId.equals(TOKEN_2022_PROGRAM_ID) ? "Token-2022" : "Token",
+          });
 
           return {
             mintAddress,
@@ -189,10 +345,10 @@ const TokensPage: React.FC = () => {
             decimals: mintInfo.decimals,
           };
         } catch (error) {
-          // console.error(
-          //   `Error fetching details for token ${mintAddress}:`,
-          //   error
-          // );
+          console.error(
+            `[TokensPage] Error fetching details for token ${mintAddress.slice(0, 8)}...:`,
+            error
+          );
           return null;
         }
       });
@@ -209,11 +365,18 @@ const TokensPage: React.FC = () => {
         return b.balance - a.balance; // Secondary sort by balance amount
       });
 
-      //console.log("Final processed tokens:", sortedTokens);
+      console.log("[TokensPage] Final processed tokens:", sortedTokens.length, "tokens");
+      if (sortedTokens.length > 0) {
+        console.log("[TokensPage] Token details:", sortedTokens.map(t => ({
+          mint: t.mintAddress.slice(0, 8) + "...",
+          balance: t.balance,
+          decimals: t.decimals
+        })));
+      }
       setTokens(sortedTokens);
     } catch (error) {
-      //console.error("Error fetching tokens:", error);
-      toast.error("Failed to fetch tokens");
+      console.error("[TokensPage] Error fetching tokens:", error);
+      toast.error(`Failed to fetch tokens: ${error instanceof Error ? error.message : "Unknown error"}`);
     } finally {
       setLoading(false);
     }
@@ -226,7 +389,7 @@ const TokensPage: React.FC = () => {
   };
 
   const handleDeleteToken = async (token: TokenInfo) => {
-    if (!connected || !publicKey || !signTransaction) {
+    if (!connected || !publicKey) {
       toast.error("Please connect your wallet first");
       return;
     }
@@ -234,82 +397,132 @@ const TokensPage: React.FC = () => {
     const toastId = toast.loading("Processing delete transaction...");
 
     try {
-      const connection = new Connection(
-        "https://api.devnet.solana.com",
-        "confirmed"
-      );
-      const mintPubkey = new PublicKey(token.mintAddress);
-
-      // Get the associated token account
-      const associatedTokenAddress = await getAssociatedTokenAddress(
-        mintPubkey,
-        publicKey
-      );
-
-      // Verify token account exists and has zero balance
-      const tokenAccount = await getAccount(connection, associatedTokenAddress);
-      const currentBalance = Number(tokenAccount.amount);
-
-      if (currentBalance > 0) {
-        toast.error("Cannot delete token with non-zero balance", {
-          id: toastId,
-        });
+      // Validate mint address
+      try {
+        new PublicKey(token.mintAddress);
+      } catch (error) {
+        toast.error("Invalid mint address", { id: toastId });
         return;
       }
 
-      // Create close account instruction
-      const closeInstruction = createCloseAccountInstruction(
-        associatedTokenAddress, // account to close
-        publicKey, // destination
-        publicKey, // authority
-        [] // multisig signers (empty array if not multisig)
-      );
+      const response = await tokenService.closeTokenAccount({
+        mintAddress: token.mintAddress,
+      });
 
-      // Create and send transaction
-      const transaction = new Transaction().add(closeInstruction);
-      transaction.feePayer = publicKey;
-      transaction.recentBlockhash = (
-        await connection.getLatestBlockhash()
-      ).blockhash;
-
-      // Sign and send transaction
-      const signedTransaction = await signTransaction(transaction);
-      const signature = await connection.sendRawTransaction(
-        signedTransaction.serialize()
-      );
-
-      // Wait for confirmation
-      toast.loading("Waiting for confirmation...", { id: toastId });
-      const confirmation = await connection.confirmTransaction(
-        signature,
-        "finalized"
-      );
-
-      if (confirmation.value.err) {
-        throw new Error("Transaction failed");
+      if (response.success) {
+        toast.success(
+          response.message || "Token account closed successfully!",
+          { id: toastId }
+        );
+        await handleRefresh(); // Refresh the token list
+      } else {
+        throw new Error(response.message || "Failed to close token account");
       }
-
-      toast.success("Token deleted successfully!", { id: toastId });
-      await handleRefresh(); // Refresh the token list
-    } catch (error) {
-      //console.error("Delete error:", error);
-      toast.error(error.message || "Failed to delete token", { id: toastId });
+    } catch (error: any) {
+      console.error("Delete error:", error);
+      const errorMessage =
+        error?.message || error?.error || "Failed to close token account";
+      toast.error(errorMessage, { id: toastId });
     } finally {
       setTokenToDelete(null); // Close the modal
     }
   };
 
-  // Refresh tokens when navigating from burn page
-  useEffect(() => {
-    const fromBurn = location.state?.fromBurn;
-    if (fromBurn && connected && publicKey) {
-      //console.log("Detected navigation from burn page, refreshing tokens");
-      // Add a small delay to ensure blockchain state is updated
-      setTimeout(() => {
-        handleRefresh();
-      }, 2000);
+  const handleTransferToken = async (
+    toWallet: string,
+    amount: string,
+    tokenStandard: string
+  ) => {
+    if (!connected || !publicKey || !tokenToTransfer) {
+      toast.error("Please connect your wallet first");
+      return;
     }
-  }, [location.state]);
+
+    const toastId = toast.loading("Processing transfer...");
+
+    try {
+      // Validate addresses
+      try {
+        new PublicKey(toWallet);
+        new PublicKey(tokenToTransfer.mintAddress);
+      } catch (error) {
+        toast.error("Invalid address format", { id: toastId });
+        return;
+      }
+
+      // Validate amount
+      const amountNum = parseFloat(amount);
+      if (isNaN(amountNum) || amountNum <= 0) {
+        toast.error("Please enter a valid positive amount", { id: toastId });
+        return;
+      }
+
+      if (amountNum > tokenToTransfer.balance) {
+        toast.error("Amount exceeds available balance", { id: toastId });
+        return;
+      }
+
+      const response = await tokenService.transferTokens({
+        mintAddress: tokenToTransfer.mintAddress,
+        toWallet: toWallet,
+        amount: amount,
+        tokenStandard: tokenStandard,
+      });
+
+      if (response.success) {
+        toast.success(
+          response.message || "Tokens transferred successfully!",
+          { id: toastId }
+        );
+        setTokenToTransfer(null);
+        await handleRefresh(); // Refresh the token list
+      } else {
+        throw new Error(response.message || "Failed to transfer tokens");
+      }
+    } catch (error: any) {
+      console.error("Transfer error:", error);
+      let errorMessage =
+        error?.message || error?.error || "Failed to transfer tokens";
+      
+      // Add details if available (e.g., for InsufficientTokenBalanceError)
+      if (error?.details) {
+        const details = error.details;
+        if (details.required && details.available) {
+          errorMessage += ` (Required: ${details.required}, Available: ${details.available})`;
+        }
+      }
+      
+      toast.error(errorMessage, { id: toastId });
+    }
+  };
+
+  // Refresh tokens when navigating from mint or burn page
+  useEffect(() => {
+    const fromMintPage = location.state?.fromMintPage;
+    const fromBurn = location.state?.fromBurn;
+    const refreshTimestamp = location.state?.refreshTimestamp;
+    
+    if ((fromMintPage || fromBurn) && connected && publicKey) {
+      console.log("[TokensPage] Detected navigation from mint/burn page, refreshing tokens");
+      // Add a delay to ensure blockchain state is updated
+      // Longer delay for minting as it may take more time to propagate
+      const delay = fromMintPage ? 5000 : 2000;
+      
+      // First refresh after initial delay
+      setTimeout(() => {
+        console.log("[TokensPage] First refresh after mint");
+        handleRefresh();
+      }, delay);
+      
+      // Second refresh after longer delay to catch finalized transactions
+      if (fromMintPage) {
+        setTimeout(() => {
+          console.log("[TokensPage] Second refresh after mint (finalized check)");
+          handleRefresh();
+        }, delay + 5000);
+      }
+    }
+  }, [location.state, connected, publicKey]);
 
   // Initial fetch and wallet connection changes
   useEffect(() => {
@@ -424,15 +637,24 @@ const TokensPage: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="pt-2">
+                <div className="flex gap-2 pt-2">
+                  {token.balance > 0 && (
+                    <button
+                      onClick={() => setTokenToTransfer(token)}
+                      className="flex-1 flex items-center justify-center gap-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white font-medium py-2 rounded-lg transition-all duration-200 hover:from-purple-600 hover:to-pink-600"
+                    >
+                      <Send className="w-4 h-4" />
+                      Transfer
+                    </button>
+                  )}
                   <a
                     href={`https://explorer.solana.com/address/${token.mintAddress}?cluster=devnet`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex items-center gap-2 text-purple-400 hover:text-purple-300 transition-colors"
+                    className="flex items-center gap-2 text-purple-400 hover:text-purple-300 transition-colors px-3 py-2"
                   >
                     <ExternalLink className="w-4 h-4" />
-                    View on Solana Explorer
+                    Explorer
                   </a>
                 </div>
               </div>
@@ -446,6 +668,14 @@ const TokensPage: React.FC = () => {
           token={tokenToDelete}
           onClose={() => setTokenToDelete(null)}
           onConfirm={() => handleDeleteToken(tokenToDelete)}
+        />
+      )}
+
+      {tokenToTransfer && (
+        <TransferModal
+          token={tokenToTransfer}
+          onClose={() => setTokenToTransfer(null)}
+          onConfirm={handleTransferToken}
         />
       )}
     </div>
