@@ -3,40 +3,75 @@ import { useWallet } from "@solana/wallet-adapter-react";
 import { Loader2, UserPlus, Info } from "lucide-react";
 import toast from "react-hot-toast";
 import GlowingCard from "../components/GlowingCard";
+import { PublicKey } from "@solana/web3.js";
+import { tokenService } from "../lib/api";
 
 const DelegatePage = () => {
   const { publicKey, connected } = useWallet();
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
-    tokenAddress: "",
-    delegateAddress: "",
+    mintAddress: "",
+    delegatePublicKey: "",
     amount: "",
   });
 
-  const handleDelegate = async (e) => {
+  const handleDelegate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!connected) {
+    if (!connected || !publicKey) {
       toast.error("Please connect your wallet first");
       return;
     }
 
     if (
-      !formData.tokenAddress ||
-      !formData.delegateAddress ||
+      !formData.mintAddress ||
+      !formData.delegatePublicKey ||
       !formData.amount
     ) {
       toast.error("Please fill in all required fields");
       return;
     }
 
+    const toastId = toast.loading("Processing delegation...");
+
     try {
       setLoading(true);
-      // Delegate token logic will go here
-      await new Promise((resolve) => setTimeout(resolve, 2000)); // Simulated delay
-      toast.success("Token delegated successfully!");
-      setFormData({ tokenAddress: "", delegateAddress: "", amount: "" });
-    } catch (error) {
-      toast.error(error.message || "Failed to delegate token");
+
+      // Validate addresses
+      try {
+        new PublicKey(formData.mintAddress);
+        new PublicKey(formData.delegatePublicKey);
+      } catch (error) {
+        toast.error("Invalid address format", { id: toastId });
+        return;
+      }
+
+      // Validate amount
+      const amount = parseFloat(formData.amount);
+      if (isNaN(amount) || amount <= 0) {
+        toast.error("Please enter a valid positive amount", { id: toastId });
+        return;
+      }
+
+      const response = await tokenService.delegateToken({
+        mintAddress: formData.mintAddress,
+        delegatePublicKey: formData.delegatePublicKey,
+        amount: formData.amount,
+      });
+
+      if (response.success) {
+        toast.success(
+          response.message || "Token delegated successfully!",
+          { id: toastId }
+        );
+        setFormData({ mintAddress: "", delegatePublicKey: "", amount: "" });
+      } else {
+        throw new Error(response.message || "Failed to delegate token");
+      }
+    } catch (error: any) {
+      console.error("Delegate error:", error);
+      const errorMessage =
+        error?.message || error?.error || "Failed to delegate token";
+      toast.error(errorMessage, { id: toastId });
     } finally {
       setLoading(false);
     }
@@ -60,31 +95,34 @@ const DelegatePage = () => {
 
         <form onSubmit={handleDelegate} className="space-y-6">
           <div>
-            <label className="block text-gray-300 mb-2">Token Address *</label>
+            <label className="block text-gray-300 mb-2">Mint Address *</label>
             <input
               type="text"
-              value={formData.tokenAddress}
+              value={formData.mintAddress}
               onChange={(e) =>
-                setFormData({ ...formData, tokenAddress: e.target.value })
+                setFormData({ ...formData, mintAddress: e.target.value })
               }
               className="w-full bg-[#2A303C] border border-gray-700 rounded-lg px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-colors"
-              placeholder="Enter token address"
+              placeholder="Enter mint address"
               disabled={loading}
             />
           </div>
 
           <div>
             <label className="block text-gray-300 mb-2">
-              Delegate Address *
+              Delegate Public Key *
             </label>
             <input
               type="text"
-              value={formData.delegateAddress}
+              value={formData.delegatePublicKey}
               onChange={(e) =>
-                setFormData({ ...formData, delegateAddress: e.target.value })
+                setFormData({
+                  ...formData,
+                  delegatePublicKey: e.target.value,
+                })
               }
               className="w-full bg-[#2A303C] border border-gray-700 rounded-lg px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-colors"
-              placeholder="Enter delegate address"
+              placeholder="Enter delegate public key"
               disabled={loading}
             />
           </div>

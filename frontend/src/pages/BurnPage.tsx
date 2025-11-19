@@ -1,40 +1,29 @@
 import React, { useState } from "react";
-import { useWallet, useConnection } from "@solana/wallet-adapter-react";
+import { useWallet } from "@solana/wallet-adapter-react";
 import { Loader2, Flame, Info } from "lucide-react";
 import toast from "react-hot-toast";
 import GlowingCard from "../components/GlowingCard";
 import { useNavigate } from "react-router-dom";
-import {
-  PublicKey,
-  Transaction,
-  sendAndConfirmTransaction,
-} from "@solana/web3.js";
-import {
-  TOKEN_PROGRAM_ID,
-  createBurnInstruction,
-  getAssociatedTokenAddress,
-  getAccount,
-  getMint,
-} from "@solana/spl-token";
+import { PublicKey } from "@solana/web3.js";
+import { tokenService } from "../lib/api";
 
 const BurnPage = () => {
-  const { publicKey, connected, signTransaction } = useWallet();
-  const { connection } = useConnection();
+  const { publicKey, connected } = useWallet();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
-    tokenAddress: "",
+    mintAddress: "",
     amount: "",
   });
 
   const handleBurnToken = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!connected || !publicKey || !signTransaction) {
+    if (!connected || !publicKey) {
       toast.error("Please connect your wallet first");
       return;
     }
 
-    if (!formData.tokenAddress || !formData.amount) {
+    if (!formData.mintAddress || !formData.amount) {
       toast.error("Please fill in all required fields");
       return;
     }
@@ -44,116 +33,44 @@ const BurnPage = () => {
     try {
       setLoading(true);
 
-      // Validate token address
-      let mintPubkey: PublicKey;
+      // Validate mint address
       try {
-        mintPubkey = new PublicKey(formData.tokenAddress);
+        new PublicKey(formData.mintAddress);
       } catch (error) {
-        toast.error("Invalid token address", { id: toastId });
+        toast.error("Invalid mint address", { id: toastId });
         return;
       }
 
-      // Get the associated token account
-      const associatedTokenAddress = await getAssociatedTokenAddress(
-        mintPubkey,
-        publicKey
-      );
+      // Validate amount
+      const amount = parseFloat(formData.amount);
+      if (isNaN(amount) || amount <= 0) {
+        toast.error("Please enter a valid positive amount", { id: toastId });
+        return;
+      }
 
-      // Get mint info for decimals
-      const mintInfo = await getMint(connection, mintPubkey);
-      const decimals = mintInfo.decimals;
+      const response = await tokenService.burnToken({
+        mintAddress: formData.mintAddress,
+        amount: formData.amount,
+      });
 
-      // Verify token account exists and has enough balance
-      let initialBalance;
-      try {
-        const tokenAccount = await getAccount(
-          connection,
-          associatedTokenAddress
-        );
-        initialBalance = Number(tokenAccount.amount);
-        const burnAmount = Number(formData.amount) * Math.pow(10, decimals); // Convert to raw amount
-
-        if (initialBalance < burnAmount) {
-          toast.error("Insufficient token balance", { id: toastId });
-          return;
-        }
-      } catch (error) {
-        toast.error("Token account not found. Make sure you own this token.", {
+      if (response.success) {
+        toast.success(response.message || "Tokens burned successfully!", {
           id: toastId,
         });
-        return;
+        setFormData({ mintAddress: "", amount: "" });
+
+        // Navigate to TokensPage after successful burn
+        setTimeout(() => {
+          navigate("/tokens", { state: { fromBurn: true } });
+        }, 1500);
+      } else {
+        throw new Error(response.message || "Failed to burn tokens");
       }
-
-      // Create burn instruction with the correct amount (accounting for decimals)
-      const burnInstruction = createBurnInstruction(
-        associatedTokenAddress,
-        mintPubkey,
-        publicKey,
-        Number(formData.amount) * Math.pow(10, decimals) // Convert to raw amount
-      );
-
-      // Create and send transaction
-      const transaction = new Transaction().add(burnInstruction);
-      transaction.feePayer = publicKey;
-      transaction.recentBlockhash = (
-        await connection.getLatestBlockhash()
-      ).blockhash;
-
-      // Sign and send transaction
-      const signedTransaction = await signTransaction(transaction);
-      const signature = await connection.sendRawTransaction(
-        signedTransaction.serialize()
-      );
-
-      // Wait for confirmation with more confirmations
-      toast.loading("Waiting for transaction confirmation...", { id: toastId });
-      const confirmation = await connection.confirmTransaction(
-        signature,
-        "finalized" // Use finalized commitment for stronger confirmation
-      );
-
-      if (confirmation.value.err) {
-        throw new Error("Transaction failed");
-      }
-
-      // Verify the burn was successful by checking the token account again
-      try {
-        // Wait a brief moment to ensure chain state is updated
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-
-        const tokenAccount = await getAccount(
-          connection,
-          associatedTokenAddress
-        );
-        const newBalance = Number(tokenAccount.amount);
-        const burnAmount = Number(formData.amount) * Math.pow(10, decimals);
-        const expectedBalance = initialBalance - burnAmount;
-
-        console.log("Burn verification:", {
-          initialBalance,
-          burnAmount,
-          expectedBalance,
-          newBalance,
-        });
-
-        if (newBalance !== expectedBalance) {
-          throw new Error("Burn verification failed - balance mismatch");
-        }
-      } catch (error) {
-        console.error("Verification error:", error);
-        // Don't throw here, as the transaction might have succeeded
-      }
-
-      toast.success("Tokens burned successfully!", { id: toastId });
-      setFormData({ tokenAddress: "", amount: "" });
-
-      // Navigate to TokensPage after successful burn
-      setTimeout(() => {
-        navigate("/tokens", { state: { fromBurn: true } });
-      }, 1500);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Burn error:", error);
-      toast.error(error.message || "Failed to burn tokens", { id: toastId });
+      const errorMessage =
+        error?.message || error?.error || "Failed to burn tokens";
+      toast.error(errorMessage, { id: toastId });
     } finally {
       setLoading(false);
     }
@@ -177,15 +94,15 @@ const BurnPage = () => {
 
         <form onSubmit={handleBurnToken} className="space-y-6">
           <div>
-            <label className="block text-gray-300 mb-2">Token Address *</label>
+            <label className="block text-gray-300 mb-2">Mint Address *</label>
             <input
               type="text"
-              value={formData.tokenAddress}
+              value={formData.mintAddress}
               onChange={(e) =>
-                setFormData({ ...formData, tokenAddress: e.target.value })
+                setFormData({ ...formData, mintAddress: e.target.value })
               }
               className="w-full bg-[#2A303C] border border-gray-700 rounded-lg px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-colors"
-              placeholder="Enter token address"
+              placeholder="Enter mint address"
               disabled={loading}
             />
           </div>
