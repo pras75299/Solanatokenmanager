@@ -205,13 +205,28 @@ const airdropSol = async (publicKey) => {
 };
 
 // Function to mint a new token
+// Option 1: Use shared mint (current behavior - all tokens from same mint)
+// Option 2: Create new mint each time (uncomment the createMint code below)
 const mintToken = async (recipientPublicKey) => {
   try {
     const recipientKey = new PublicKey(recipientPublicKey);
     console.log("Recipient Public Key in mintToken:", recipientKey.toString());
 
+    // CURRENT: Using shared mint address (all tokens are the same type)
     const mintAddress = await getOrCreateMintAddress();
-    console.log("Mint Address in mintToken:", mintAddress);
+    console.log("Mint Address in mintToken (shared):", mintAddress);
+
+    // ALTERNATIVE: Create a new mint for each mint operation (uncomment to use)
+    // const mint = await createMint(
+    //   connection,
+    //   payerKeypair,
+    //   payerKeypair.publicKey,
+    //   null,
+    //   9
+    // );
+    // const mintAddress = mint.toString();
+    // console.log("Mint Address in mintToken (new):", mintAddress);
+
     const mintPublicKey = new PublicKey(mintAddress);
 
     const recipientTokenAccount = await getOrCreateAssociatedTokenAccount(
