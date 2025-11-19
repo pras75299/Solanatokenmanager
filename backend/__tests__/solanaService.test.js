@@ -1,3 +1,11 @@
+const dummyPrivateKey = Buffer.alloc(64, 1).toString("base64");
+const dummySecretKey = JSON.stringify(Array(64).fill(1));
+
+process.env.SOLANA_PRIVATE_KEY =
+  process.env.SOLANA_PRIVATE_KEY || dummyPrivateKey;
+process.env.SOLANA_SECRET_KEY =
+  process.env.SOLANA_SECRET_KEY || dummySecretKey;
+
 const { convertAmountToRawUnits } = require("../services/solanaService");
 
 describe("convertAmountToRawUnits", () => {

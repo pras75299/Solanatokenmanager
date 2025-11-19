@@ -1,3 +1,11 @@
+const dummyPrivateKey = Buffer.alloc(64, 1).toString("base64");
+const dummySecretKey = JSON.stringify(Array(64).fill(1));
+
+process.env.SOLANA_PRIVATE_KEY =
+  process.env.SOLANA_PRIVATE_KEY || dummyPrivateKey;
+process.env.SOLANA_SECRET_KEY =
+  process.env.SOLANA_SECRET_KEY || dummySecretKey;
+
 jest.mock("../services/solanaService", () => {
   const actual = jest.requireActual("../services/solanaService");
   return {
@@ -16,6 +24,7 @@ jest.mock("../services/solanaService", () => {
 const request = require("supertest");
 const { createApp } = require("../app");
 const solanaService = require("../services/solanaService");
+const { InsufficientTokenBalanceError } = require("../services/errors");
 
 const VALID_PUBLIC_KEY = "4Nd1mW2JxYNrP4QW7w3fGH5pK9mHF4RS8Pf63HgFNDNm";
 
@@ -83,6 +92,28 @@ describe("Token routes", () => {
       "2.5",
       "Token"
     );
+  });
+
+  test("POST /api/transfer-tokens surfaces insufficient balance errors from the service layer", async () => {
+    const insufficientError = new InsufficientTokenBalanceError({
+      required: 1000n,
+      available: 10n,
+    });
+    solanaService.transferTokens.mockRejectedValueOnce(insufficientError);
+
+    const response = await request(app)
+      .post("/api/transfer-tokens")
+      .send({
+        mintAddress: VALID_PUBLIC_KEY,
+        toWallet: VALID_PUBLIC_KEY,
+        amount: "1",
+        tokenStandard: "Token",
+      });
+
+    expect(response.status).toBe(400);
+    expect(response.body.success).toBe(false);
+    expect(response.body.message).toBe(insufficientError.message);
+    expect(response.body.error).toBe(insufficientError.message);
   });
 
   test("GET /api/balance/:publicKey returns validation errors for malformed keys", async () => {
